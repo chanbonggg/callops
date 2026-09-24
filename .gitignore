@@ -45,3 +45,14 @@ tmp/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Python and local harness output
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+spool/
+artifacts/
+node_modules/
