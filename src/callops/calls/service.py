@@ -6,14 +6,45 @@ import re
 import stat
 import wave
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import uuid4
 
 import psycopg
 from psycopg.rows import dict_row
 
-
 from ..common import Conflict, digest, identifier, utcnow, valid_hash
+
+CALL_TIMEZONE = timezone(timedelta(hours=9))
+
+
+def counterparty_name(value):
+    if not isinstance(value, str) or len(value) > 100 or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise Conflict('INVALID_COUNTERPARTY')
+    return value.strip() or None
+
+
+def recording_filters(counterparty, from_date, to_date):
+    name = counterparty_name(counterparty)
+    try:
+        start = (datetime.combine(date.fromisoformat(from_date), time.min, CALL_TIMEZONE).astimezone(timezone.utc)
+                 if from_date else None)
+        end = (datetime.combine(date.fromisoformat(to_date) + timedelta(days=1), time.min, CALL_TIMEZONE)
+               .astimezone(timezone.utc) if to_date else None)
+        if start and end and start >= end:
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        raise Conflict('INVALID_CALL_FILTER') from None
+    clauses, values = [], []
+    if name:
+        clauses.append('strpos(lower(r.counterparty),lower(%s)) > 0')
+        values.append(name)
+    if start:
+        clauses.append('r.call_started_at >= %s')
+        values.append(start)
+    if end:
+        clauses.append('r.call_started_at < %s')
+        values.append(end)
+    return clauses, values
 
 
 class Service:
@@ -65,6 +96,39 @@ class Service:
 
     def audio_path(self, row):
         return self.safe_path('quarantine', str(row['storage_key']))
+
+    def update_metadata(self, recording_id, counterparty, call_started_at):
+        name = counterparty_name(counterparty)
+        started = None
+        if call_started_at:
+            try:
+                if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?', call_started_at):
+                    raise ValueError
+                local = datetime.fromisoformat(call_started_at)
+                started = local.replace(tzinfo=CALL_TIMEZONE).astimezone(timezone.utc)
+            except (TypeError, ValueError, OverflowError):
+                raise Conflict('INVALID_CALL_TIME') from None
+        with self.transaction() as conn:
+            row = self.recording(conn, recording_id)
+            if (row['classification_status'] not in ('PENDING', 'DEFERRED')
+                    or row['deletion_state'] != 'NONE' or row['expires_at'] <= self.clock()):
+                raise Conflict('METADATA_LOCKED')
+            conn.execute('''UPDATE callops.recordings
+                SET counterparty=%s,call_started_at=%s,call_time_source=%s,call_time_trusted=%s
+                WHERE id=%s''', (name, started, 'USER_CONFIRMED' if started else None,
+                                  started is not None, row['id']))
+
+    def list_recordings(self, counterparty='', from_date='', to_date=''):
+        clauses, values = recording_filters(counterparty, from_date, to_date)
+        query = 'SELECT r.* FROM callops.recordings r'
+        if clauses:
+            clauses.insert(0, """deletion_state='NONE' AND (classification_status='BUSINESS_APPROVED'
+                OR (classification_status IN ('PENDING','DEFERRED') AND expires_at>%s))""")
+            values.insert(0, self.clock())
+            query += ' WHERE ' + ' AND '.join(clauses)
+        query += ' ORDER BY received_at DESC, id DESC LIMIT 200'
+        with self.transaction() as conn:
+            return conn.execute(query, values).fetchall()
 
     def ingest(self, name, completed_sha256):
         """Producer supplies a checksum only after closing its completed transfer.
@@ -171,7 +235,9 @@ class Service:
         self.maintain()
 
     def request_delete(self, conn, recording_id):
-        conn.execute("UPDATE callops.recordings SET deletion_state='REQUESTED' WHERE id=%s", (recording_id,))
+        conn.execute('''UPDATE callops.recordings SET deletion_state='REQUESTED',
+            counterparty=NULL,call_started_at=NULL,call_time_source=NULL,call_time_trusted=false
+            WHERE id=%s''', (recording_id,))
         conn.execute("UPDATE callops.jobs SET status='CANCELLED' WHERE recording_id=%s", (recording_id,))
         conn.execute('''UPDATE callops.attempts SET cleanup_requested=true WHERE job_id IN
             (SELECT id FROM callops.jobs WHERE recording_id=%s)''', (recording_id,))

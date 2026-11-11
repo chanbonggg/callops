@@ -46,7 +46,7 @@ python scripts/manage.py check
 - 앱은 DDL·마이그레이션 이력 변경·마이그레이터 SET ROLE을 할 수 없다. PostgreSQL 실제 권한으로 검증한다.
 - [001_initial.sql](../migrations/001_initial.sql)은 파일 해시와 함께 기록한다. 적용한 파일 변경·알 수 없는 DB 버전은 거부하며 재실행은 멱등이다.
 - 트랜잭션 자문 잠금으로 동시 마이그레이션을 직렬화하고 실패한 SQL의 DDL/이력은 함께 롤백한다. 기존 마이그레이션 수정 대신 다음 번호 파일을 추가한다.
-- 파괴적 down migration이나 데이터 초기화 명령은 제공하지 않는다. P2 수집·P3 큐의 테이블은 `002_ingestion_queue.sql`에 추가했다.
+- 파괴적 down migration이나 데이터 초기화 명령은 제공하지 않는다. P2 수집·P3 큐의 테이블은 `002_ingestion_queue.sql`에 추가했다. `003_recording_metadata.sql`은 기존 녹음을 유지하면서 선택 입력인 상대 이름 열을 추가한다.
 
 ## 검증 대상
 

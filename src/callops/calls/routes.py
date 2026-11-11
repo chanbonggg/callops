@@ -9,6 +9,7 @@ from starlette.routing import Route
 from starlette.templating import Jinja2Templates
 
 from ..common import Conflict, digest
+from .service import CALL_TIMEZONE
 
 
 TEMPLATES = Jinja2Templates(directory=Path(__file__).with_name('templates'))
@@ -16,11 +17,18 @@ TEMPLATES = Jinja2Templates(directory=Path(__file__).with_name('templates'))
 
 def routes(service):
     def index(request):
-        with service.transaction() as conn:
-            rows = conn.execute('SELECT * FROM callops.recordings ORDER BY received_at DESC LIMIT 200').fetchall()
+        filters = {name: request.query_params.get(name, '') for name in ('counterparty', 'from_date', 'to_date')}
+        rows = service.list_recordings(**filters)
         return TEMPLATES.TemplateResponse(request, 'index.html', {
-            'rows': rows, 'csrf': request.state.login['csrf'],
+            'rows': rows, 'csrf': request.state.login['csrf'], 'filters': filters,
+            'now': service.clock(), 'call_timezone': CALL_TIMEZONE,
         })
+
+    def metadata(request):
+        form = request.state.form
+        service.update_metadata(request.path_params['recording_id'], form.get('counterparty', ''),
+                                form.get('call_started_at', ''))
+        return RedirectResponse('/', status_code=302)
 
     def audio(request):
         with service.transaction() as conn:
@@ -41,6 +49,7 @@ def routes(service):
 
     return [
         Route('/', index),
+        Route('/recordings/{recording_id:uuid}/metadata', metadata, methods=['POST']),
         Route('/recordings/{recording_id:uuid}/audio', audio),
         Route('/recordings/{recording_id:uuid}/classify', classify, methods=['POST']),
     ]

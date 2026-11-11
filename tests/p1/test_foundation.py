@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg
 
@@ -61,9 +62,23 @@ class DatabaseTests(unittest.TestCase):
             readiness(self.app)
         source = Path(__file__).resolve().parents[2] / "migrations"
         names = sorted(path.name for path in source.glob('*.sql'))
-        self.assertEqual(migrate(self.owner), names)
+        with tempfile.TemporaryDirectory() as temp:
+            old_migrations = Path(temp)
+            for name in names[:2]:
+                (old_migrations / name).write_bytes((source / name).read_bytes())
+            self.assertEqual(migrate(self.owner, old_migrations), names[:2])
+        legacy_id = uuid4()
+        with psycopg.connect(self.app.database_url) as conn:
+            conn.execute("INSERT INTO callops.recordings (id,sha256,size_bytes,storage_key) VALUES (%s,%s,10,%s)",
+                         (legacy_id, "b" * 64, uuid4()))
+        self.assertEqual(migrate(self.owner), names[2:])
         self.assertEqual(migrate(self.owner), [])
         readiness(self.app)
+        with psycopg.connect(self.app.database_url) as conn:
+            legacy = conn.execute("SELECT counterparty,call_started_at,call_time_trusted FROM callops.recordings WHERE id=%s",
+                                  (legacy_id,)).fetchone()
+            self.assertEqual(legacy, (None, None, False))
+            conn.execute("DELETE FROM callops.recordings WHERE id=%s", (legacy_id,))
         with psycopg.connect(self.app.database_url) as conn:
             row = conn.execute("INSERT INTO callops.recordings (id, sha256, size_bytes, storage_key) VALUES (gen_random_uuid(), %s, 10, gen_random_uuid()) RETURNING classification_status", ("a" * 64,)).fetchone()
             self.assertEqual(row[0], "PENDING")
