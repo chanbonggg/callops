@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta
 from uuid import uuid4
 
-from .service import Conflict, digest, identifier, valid_hash
+from ..common import Conflict, digest, identifier, valid_hash
 
 
 class Queue:

@@ -9,7 +9,8 @@ import psycopg
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from callops.config import ConfigurationError, Settings
 from callops.db import DatabaseError, migrate, readiness
-from callops.service import Conflict, Service
+from callops.calls.service import Service
+from callops.common import Conflict
 
 
 def main():
@@ -30,10 +31,12 @@ def main():
         elif args.command == 'serve':
             if not args.cert or not args.key:
                 parser.error('serve requires --cert and --key; secure session cookies require HTTPS')
+            import uvicorn
             from callops.web import create_app
-            # Local development only. C1 deployment must choose its WSGI/TLS host.
-            create_app(settings).run(host='127.0.0.1', port=8443, debug=False,
-                                     ssl_context=(str(args.cert), str(args.key)))
+
+            uvicorn.run(create_app(settings), host='127.0.0.1', port=8443,
+                        ssl_certfile=str(args.cert), ssl_keyfile=str(args.key),
+                        access_log=False, proxy_headers=False)
         else:
             readiness(settings)
             service = Service(settings)
@@ -42,7 +45,7 @@ def main():
                     parser.error('ingest requires --name and producer --sha256')
                 print('Accepted recording:', service.ingest(args.name, args.sha256))
             else:
-                from callops.queue import Queue
+                from callops.processing.queue import Queue
                 service.recover()
                 Queue(service).reap()
                 print('Maintenance completed; offline worker copies may still require confirmation')

@@ -5,8 +5,8 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from callops.fake_worker import FakeWorker
-from callops.service import Conflict, digest
+from callops.processing.fake_worker import FakeWorker
+from callops.common import Conflict, digest
 from tests.support import ProductCase
 
 
@@ -19,13 +19,13 @@ class QueueTests(ProductCase):
     def claim(self, worker='one'):
         result = self.api('claim', worker=worker)
         self.assertEqual(result.status_code, 200)
-        return result.get_json()
+        return result.json()
 
     def start(self, job):
         key = {'request_id': str(uuid4())}
         response = self.api('start', job, json=key)
         self.assertEqual(response.status_code, 200)
-        return key, response.get_json()
+        return key, response.json()
 
     def prepare(self, job, **changes):
         payload = {key: job[key] for key in ('job_id', 'input_sha256', 'input_artifact_id', 'input_artifact_version')}
@@ -33,10 +33,10 @@ class QueueTests(ProductCase):
         report = {'request_id': str(uuid4()), 'sha256': digest(data), 'size': len(data), 'spool_created_at': self.now.isoformat()}
         response = self.api('prepared', job, json=report)
         self.assertEqual(response.status_code, 200)
-        return data, report, response.get_json()
+        return data, report, response.json()
 
     def upload(self, job, data, report):
-        return self.api('result', job, data=data, headers={'X-Result-Request-ID': report['request_id']})
+        return self.api('result', job, content=data, headers={'X-Result-Request-ID': report['request_id']})
 
     def heartbeat_for(self, job, minutes):
         for _ in range(minutes // 4):
@@ -45,6 +45,15 @@ class QueueTests(ProductCase):
         if minutes % 4:
             self.advance(minutes=minutes % 4)
             self.assertEqual(self.api('heartbeat', job, json={}).status_code, 200)
+
+    def test_worker_rejects_malformed_json_and_oversized_upload(self):
+        for content in (b'{', b'[]'):
+            response = self.api('cleanup', content=content, headers={'Content-Type': 'application/json'})
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.api('cleanup', content=b'{}').status_code, 400)
+        job = {'job_id': str(uuid4()), 'lease_token': str(uuid4())}
+        chunks = (b'x' * (1024 * 1024) for _ in range(9))
+        self.assertEqual(self.api('result', job, content=chunks).status_code, 413)
 
     def test_concurrent_claim_two_connections_and_worker_scope(self):
         self.approved()
@@ -82,15 +91,15 @@ class QueueTests(ProductCase):
         self.heartbeat_for(job, 6)
         start_key, start_ack = self.start(job)
         self.advance(minutes=1)
-        self.assertEqual(self.api('start', job, json=start_key).get_json(), start_ack)
+        self.assertEqual(self.api('start', job, json=start_key).json(), start_ack)
         data, report, ack = self.prepare(job)
         self.advance(minutes=1)
-        self.assertEqual(self.api('prepared', job, json=report).get_json(), ack)
+        self.assertEqual(self.api('prepared', job, json=report).json(), ack)
         self.assertEqual(self.api('prepared', job, json={**report, 'sha256': 'f' * 64}).status_code, 409)
         accepted = self.upload(job, data, report)
         self.assertEqual(accepted.status_code, 200)
         self.advance(days=1)
-        self.assertEqual(self.upload(job, data, report).get_json(), accepted.get_json())
+        self.assertEqual(self.upload(job, data, report).json(), accepted.json())
         self.assertEqual(self.upload(job, data + b' ', report).status_code, 409)
         self.assertEqual(len(self.jobs(recording)), 2)
 
@@ -113,7 +122,7 @@ class QueueTests(ProductCase):
         newer = self.claim('two')
         self.assertNotEqual(job['lease_token'], newer['lease_token'])
         self.assertEqual(self.api('start', job, json={'request_id': str(uuid4())}).status_code, 409)
-        item = self.api('cleanup', json={}).get_json()[0]
+        item = self.api('cleanup', json={}).json()[0]
         self.assertEqual(self.api('cleanup', json={**item, 'version': 999, 'stopped': True, 'removed': True}).status_code, 409)
         self.assertEqual(self.api('cleanup', worker='two', json={**item, 'stopped': True, 'removed': True}).status_code, 409)
         self.assertEqual(self.api('cleanup', json={**item, 'stopped': True, 'removed': True}).status_code, 200)
@@ -144,7 +153,7 @@ class QueueTests(ProductCase):
         self.assertEqual(self.row(recording)['deletion_state'], 'REQUESTED')
         self.assertEqual(self.upload(job, data, report).status_code, 409)
         self.assertEqual(self.api('claim').status_code, 409)
-        item = self.api('cleanup', json={}).get_json()[0]
+        item = self.api('cleanup', json={}).json()[0]
         self.assertEqual(self.api('cleanup', json={**item, 'stopped': False, 'removed': True}).status_code, 409)
         self.assertEqual(self.api('cleanup', json={**item, 'stopped': True, 'removed': True}).status_code, 200)
         self.assertEqual(self.row(recording)['deletion_state'], 'COMPLETE')
@@ -203,7 +212,7 @@ class QueueTests(ProductCase):
         self.assertEqual(len(list(self.service.safe_path('artifacts').iterdir())), 1)
         self.service.recover()
         self.assertEqual(list(self.service.safe_path('artifacts').iterdir()), [])
-        accepted = self.upload(job, data, report).get_json()
+        accepted = self.upload(job, data, report).json()
         self.service.safe_path('artifacts', accepted['artifact_id']).unlink()
         self.service.recover()
         analysis = next(row for row in self.jobs(recording) if row['stage'] == 'ANALYSIS')

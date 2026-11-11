@@ -6,11 +6,26 @@ from uuid import uuid4
 
 import psycopg
 
-from callops.service import Conflict, digest
+from callops.common import Conflict, digest
 from tests.support import ProductCase
 
 
 class IngestionTests(ProductCase):
+    def test_browser_login_accepts_multipart_and_limits_request_body(self):
+        page = self.http('GET', '/login')
+        cookie = page.headers['set-cookie'].lower()
+        for flag in ('secure', 'httponly', 'samesite=strict'):
+            self.assertIn(flag, cookie)
+        self.assertEqual(self.http('GET', '/login', headers={'Host': 'untrusted.example'}).status_code, 400)
+        self.assertEqual(self.http('POST', '/login', data={'username': 'x' * 16384}).status_code, 413)
+
+        import re
+        csrf = re.search(r'name="csrf" value="([^"]+)"', page.text)[1]
+        fields = {'username': 'owner', 'password': 'test-password', 'csrf': csrf}
+        response = self.http('POST', '/login', files={key: (None, value) for key, value in fields.items()})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.http('GET', '/').status_code, 200)
+
     def test_login_csrf_wrong_user_and_throttle(self):
         import re
         page = self.http('GET', '/login')
@@ -33,9 +48,9 @@ class IngestionTests(ProductCase):
         self.assertEqual(self.http('GET', path + '/classify').status_code, 405)
         self.assertEqual(self.http('POST', path + '/classify', data={'decision': 'BUSINESS_APPROVED'}).status_code, 403)
         self.assertEqual(self.jobs(recording), [])
-        cookie = self.client.get_cookie('session').value
+        cookie = next(cookie for cookie in self.client.cookies.jar if cookie.name == 'session')
         self.assertEqual(self.http('POST', '/logout', data={'csrf': csrf}).status_code, 302)
-        self.client.set_cookie('session', cookie)
+        self.client.cookies.jar.set_cookie(cookie)
         self.assertEqual(self.http('GET', '/').status_code, 401)
         self.login()
         self.advance(hours=8)
@@ -111,7 +126,7 @@ class IngestionTests(ProductCase):
     def test_atomic_approval_and_unique_job_and_no_ai_for_t04(self):
         recording = self.ingest()
         # Observe the real worker boundary: pending/private cannot even claim.
-        from callops.fake_worker import FakeWorker
+        from callops.processing.fake_worker import FakeWorker
         worker = FakeWorker(self.http, self.tokens['one'], Path(self.temp.name) / 'fake-worker', lambda: self.now)
         with patch.object(worker, 'call', wraps=worker.call) as calls:
             self.assertIsNone(worker.once())
@@ -142,7 +157,7 @@ class IngestionTests(ProductCase):
         def change_source(fd):
             original(fd)
             source.write_bytes(data[:-2])
-        with patch('callops.service.os.fsync', change_source), self.assertRaisesRegex(Conflict, 'TRANSFER_INCOMPLETE'):
+        with patch('callops.calls.service.os.fsync', change_source), self.assertRaisesRegex(Conflict, 'TRANSFER_INCOMPLETE'):
             self.service.ingest(source.name, digest(data))
         self.assertEqual(list(self.service.safe_path('quarantine').iterdir()), [])
 
@@ -161,7 +176,7 @@ class IngestionTests(ProductCase):
     def test_db_failure_stops_ingestion_and_recovery_removes_orphans(self):
         data = self.wav()
         self.service.safe_path('sync-inbox', 'test.wav').write_bytes(data)
-        with patch('callops.service.psycopg.connect', side_effect=psycopg.OperationalError), self.assertRaises(psycopg.OperationalError):
+        with patch('callops.calls.service.psycopg.connect', side_effect=psycopg.OperationalError), self.assertRaises(psycopg.OperationalError):
             self.service.ingest('test.wav', digest(data))
         self.assertFalse(list(self.service.safe_path('quarantine').iterdir()))
         orphan = self.service.safe_path('quarantine', str(uuid4()))

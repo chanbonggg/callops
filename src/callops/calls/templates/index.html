@@ -1,0 +1,13 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CallOps 통화 분류</title>
+<h1>통화 분류</h1><p>업무 선택은 AI 처리 승인입니다. 일정 등록은 별도 승인이 필요합니다.</p>
+<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>로그아웃</button></form>
+{% for row in rows %}<article><h2>{{ row.id }}</h2><p>{{ row.classification_status }} · {{ row.received_at }} · {{ row.duration_seconds }}초</p>
+<p>삭제: {{ row.deletion_state }}</p>
+{% if row.classification_status not in ('PRIVATE_EXCLUDED','EXPIRED') %}
+<audio controls preload="none" src="/recordings/{{ row.id }}/audio"></audio>
+<form method="post" action="/recordings/{{ row.id }}/classify">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<button name="decision" value="BUSINESS_APPROVED">업무 · AI 처리 승인</button>
+<button name="decision" value="PRIVATE_EXCLUDED">사적 · 관리 사본 삭제</button>
+{% if row.classification_status != 'BUSINESS_APPROVED' %}<button name="decision" value="DEFERRED">보류</button>{% endif %}
+</form>{% endif %}</article>{% else %}<p>수집된 통화가 없습니다.</p>{% endfor %}</html>

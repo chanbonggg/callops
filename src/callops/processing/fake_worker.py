@@ -1,7 +1,7 @@
 """Deterministic P3 worker using the real HTTP routes, never a model or Calendar.
 
-The transport takes (method, path, headers, json/data) and returns a response.
-Tests supply Flask's WSGI client so the actual API/auth/DB code runs offline.
+The transport takes (method, path, headers, json/content) and returns a response.
+Tests supply an ASGI client so the actual API/auth/DB code runs offline.
 This synchronous worker is for short synthetic jobs, not a GPU process runner.
 """
 
@@ -9,7 +9,7 @@ import json
 import os
 from uuid import uuid4
 
-from .service import digest, identifier
+from ..common import digest, identifier
 
 
 class FakeWorker:
@@ -29,7 +29,7 @@ class FakeWorker:
         return response
 
     def clean(self):
-        for item in self.call('POST', '/worker/cleanup', json={}).get_json():
+        for item in self.call('POST', '/worker/cleanup', json={}).json():
             key = str(identifier(item['copy_key']))
             for suffix in ('.input', '.spool'):
                 path = self.root / (key + suffix)
@@ -40,20 +40,22 @@ class FakeWorker:
 
     def once(self):
         self.clean()
-        job = self.call('POST', '/worker/claim').get_json()
+        job = self.call('POST', '/worker/claim').json()
         if job is None:
             return None
         path = '/worker/jobs/' + job['job_id']
         lease = job['lease_token']
-        data = self.call('GET', path + '/input', lease=lease).data
+        data = self.call('GET', path + '/input', lease=lease).content
         if digest(data) != job['input_sha256']:
             raise RuntimeError('Synthetic input hash mismatch')
         key = str(identifier(job['copy_key']))
         (self.root / (key + '.input')).write_bytes(data)
         self.call('POST', path + '/heartbeat', lease=lease, json={})
         self.call('POST', path + '/start', lease=lease, json={'request_id': str(uuid4())})
-        payload = json.dumps({name: job[name] for name in ('job_id', 'input_sha256', 'input_artifact_id', 'input_artifact_version')}
-                             | {'attempt_id': job['copy_key'], 'schema_version': 1, 'synthetic': True, 'text': 'synthetic test result'}, sort_keys=True).encode()
+        result = {name: job[name] for name in ('job_id', 'input_sha256', 'input_artifact_id', 'input_artifact_version')}
+        result.update(attempt_id=job['copy_key'], schema_version=1, synthetic=True)
+        result['text'] = 'synthetic test result'
+        payload = json.dumps(result, sort_keys=True).encode()
         spool = self.root / (key + '.spool')
         with spool.open('xb') as output:
             output.write(payload)
@@ -62,6 +64,6 @@ class FakeWorker:
         request_id = str(uuid4())
         self.call('POST', path + '/prepared', lease=lease, json={'request_id': request_id, 'sha256': digest(payload),
                   'size': len(payload), 'spool_created_at': self.clock().isoformat()})
-        ack = self.call('POST', path + '/result', lease=lease, request_id=request_id, data=spool.read_bytes()).get_json()
+        ack = self.call('POST', path + '/result', lease=lease, request_id=request_id, content=spool.read_bytes()).json()
         self.clean()
         return ack

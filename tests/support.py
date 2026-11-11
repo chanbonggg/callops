@@ -8,10 +8,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from starlette.testclient import TestClient
 from werkzeug.security import generate_password_hash
 
 from callops.config import Settings
-from callops.service import digest
+from callops.common import digest
 from callops.web import create_app
 
 
@@ -27,9 +28,9 @@ class ProductCase(unittest.TestCase):
         self.tokens = {'one': 'test-worker-one-' + 'x' * 32, 'two': 'test-worker-two-' + 'y' * 32}
         self.app = create_app(self.settings, secret='test-session-' + 'z' * 32, owner='owner',
                               password_hash=generate_password_hash('test-password'), workers=self.tokens, clock=lambda: self.now)
-        self.client = self.app.test_client()
-        self.service = self.app.extensions['callops']
-        self.queue = self.app.extensions['queue']
+        self.client = self.enterContext(TestClient(self.app, base_url='https://localhost', follow_redirects=False))
+        self.service = self.app.state.callops
+        self.queue = self.app.state.queue
         self.recordings = []
         self.addCleanup(self.clear_records)
 
@@ -71,7 +72,7 @@ class ProductCase(unittest.TestCase):
             return conn.execute('SELECT * FROM callops.jobs WHERE recording_id=%s ORDER BY stage', (recording,)).fetchall()
 
     def http(self, method, path, **kwargs):
-        return self.client.open(path, method=method, base_url='https://localhost', **kwargs)
+        return self.client.request(method, path, **kwargs)
 
     def login(self):
         page = self.http('GET', '/login')
