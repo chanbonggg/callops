@@ -73,3 +73,27 @@ class HarnessTests(unittest.TestCase):
             self.assertTrue(case["input"])
         private = next(case for case in cases if case["id"] == "T04")
         self.assertEqual(private["expected"]["ai_calls"], 0)
+
+    def test_rag_development_fixture_has_valid_scoped_evidence(self):
+        from collections import Counter
+
+        data = json.loads((ROOT / "tests/fixtures/rag-development.json").read_text(encoding="utf-8"))
+        self.assertTrue(data['synthetic'])
+        self.assertEqual(data['split'], 'development')
+        self.assertEqual(len(data['calls']), 10)
+        self.assertEqual(len(data['questions']), 20)
+        self.assertEqual(len({call['id'] for call in data['calls']}), 10)
+        self.assertEqual(len({q['id'] for q in data['questions']}), 20)
+        self.assertEqual(Counter(q['category'] for q in data['questions']),
+                         {'명확한 합의': 7, '상대·기간 필터': 4, '정정·취소': 4,
+                          '여러 통화 결합': 2, '근거 부족·모호함': 3})
+        segments = {s['id']: call for call in data['calls'] for s in call['segments']}
+        self.assertEqual(len(segments), sum(len(call['segments']) for call in data['calls']))
+        for question in data['questions']:
+            self.assertEqual(bool(question['expected_facts']), question['answerable'])
+            self.assertEqual(bool(question['abstention_reason']), not question['answerable'])
+            for segment_id in question['required_evidence_ids']:
+                call = segments[segment_id]
+                self.assertEqual(call['counterparty'], question['filters']['counterparty'])
+                self.assertLessEqual(question['filters']['from_date'], call['call_started_at'][:10])
+                self.assertLessEqual(call['call_started_at'][:10], question['filters']['to_date'])
