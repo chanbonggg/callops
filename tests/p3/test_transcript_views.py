@@ -31,6 +31,66 @@ class TranscriptViewTests(ProductCase):
     def upload(self, job, data, report):
         return self.api('result', job, content=data, headers={'X-Result-Request-ID': report['request_id']})
 
+    def save_search_transcript(self, counterparty, started_at, text):
+        recording = self.ingest()
+        self.service.update_metadata(recording, counterparty, started_at)
+        _, job, data, report = self.prepare_transcript(
+            recording=recording, segments=[{'segment_id': 1, 'start': 0, 'end': 1, 'text': text}])
+        response = self.upload(job, data, report)
+        self.assertEqual(response.status_code, 200)
+        worker = FakeWorker(self.http, self.tokens['one'], Path(self.temp.name) / 'worker', lambda: self.now)
+        self.assertTrue(worker.once()['accepted'])
+        return recording, response.json()['artifact_id']
+
+    def test_search_respects_owner_csrf_party_and_korean_call_date(self):
+        text = '방문 상담 확정 <script>가상 발화</script>'
+        recording, artifact = self.save_search_transcript('가상 A 거래처', '2029-12-31T23:59', text)
+        self.save_search_transcript('가상 A 거래처', '2030-01-01T00:00', '다음 날 방문 상담')
+        self.save_search_transcript('가상 B 거래처', '2029-12-31T23:59', '다른 거래처 방문 상담')
+        fields = {'q': '상담 방문', 'counterparty': '가상 A', 'from_date': '2029-12-31', 'to_date': '2029-12-31'}
+        self.assertEqual(self.http('GET', '/search').status_code, 401)
+        self.assertEqual(self.http('POST', '/search', data=fields).status_code, 401)
+        csrf = self.login()
+        self.assertEqual(self.http('GET', '/search').status_code, 200)
+        self.assertEqual(self.http('POST', '/search', data=fields).status_code, 403)
+        response = self.http('POST', '/search', data=dict(fields, csrf=csrf))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('방문 상담 확정', response.text)
+        self.assertNotIn('<script>가상 발화</script>', response.text)
+        self.assertNotIn('다음 날 방문 상담', response.text)
+        self.assertNotIn('다른 거래처 방문 상담', response.text)
+        source = f'/recordings/{recording}/transcripts/{artifact}'
+        self.assertIn(source + '#segment-1', response.text)
+        self.assertEqual(self.http('GET', source).status_code, 200)
+        self.service.classify(recording, 'PRIVATE_EXCLUDED')
+        response = self.http('POST', '/search', data=dict(fields, csrf=csrf))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(source, response.text)
+        self.assertNotIn('방문 상담 확정', response.text)
+
+    def test_search_omits_corrupt_expired_and_legacy_transcripts(self):
+        _, artifact = self.save_search_transcript('가상 회사', '2029-12-31T20:00', '견적서 발송 합의')
+        _, job, data, report = self.prepare_transcript(schema_version=1)
+        self.assertEqual(self.upload(job, data, report).status_code, 200)
+        csrf = self.login()
+        file = self.service.safe_path('artifacts', artifact)
+        original = file.read_bytes()
+        file.write_bytes(original + b' ')
+        response = self.http('POST', '/search', data={'q': '견적서', 'csrf': csrf})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('견적서 발송 합의', response.text)
+        self.assertIn('일부 전사를 확인할 수 없습니다', response.text)
+        response = self.http('POST', '/search', data={'q': 'synthetic test result', 'csrf': csrf})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('일치하는 전사 구간이 없습니다', response.text)
+        file.write_bytes(original)
+        self.advance(days=91)
+        csrf = self.login()
+        response = self.http('POST', '/search', data={'q': '견적서', 'csrf': csrf})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('견적서 발송 합의', response.text)
+        self.assertIn('일치하는 전사 구간이 없습니다', response.text)
+
     def test_structured_transcript_round_trip_ack_and_immutable_source_links(self):
         recording, job, data, report = self.prepare_transcript()
         result = self.upload(job, data, report)

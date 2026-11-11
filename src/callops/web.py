@@ -20,6 +20,7 @@ from .config import ConfigurationError
 from .db import readiness
 from .processing.queue import Queue
 from .processing.routes import routes as worker_routes
+from .search.routes import routes as search_routes
 
 
 class BodyLimits:
@@ -78,7 +79,7 @@ def create_app(settings, *, secret=None, owner=None, password_hash=None, workers
     queue = Queue(service)
     app = Starlette(
         routes=auth.routes(service, owner, password_hash) + call_routes(service)
-        + worker_routes(queue),
+        + worker_routes(queue) + search_routes(service),
         middleware=[
             Middleware(security_headers),
             Middleware(TrustedHostMiddleware, allowed_hosts=['localhost', '127.0.0.1']),

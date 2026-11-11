@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CallOps 전사 검색</title>
+<a href="/">통화 목록</a>
+<h1>전사 검색</h1>
+<form method="post" action="/search">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>검색어 <input name="q" required maxlength="{{ query_limit }}" value="{{ fields.q }}"></label>
+  <label>거래처 <input name="counterparty" maxlength="100" value="{{ fields.counterparty }}"></label>
+  <label>통화 시작일 <input type="date" name="from_date" value="{{ fields.from_date }}"></label>
+  <label>통화 종료일 <input type="date" name="to_date" value="{{ fields.to_date }}"></label>
+  <button>검색</button>
+</form>
+<p>공백으로 구분한 검색어가 모두 들어 있는 전사 구간을 찾습니다. 날짜는 한국 시간 기준입니다.</p>
+{% if error %}<p role="alert">{{ error }}</p>{% endif %}
+{% if limited %}<p>확인 범위에 한도가 있습니다. 거래처 또는 기간을 좁혀 다시 검색하세요.</p>{% endif %}
+{% if unavailable %}<p>일부 전사를 확인할 수 없습니다.</p>{% endif %}
+{% if matches is defined %}
+<h2>검색 결과</h2>
+{% for match in matches %}
+<article>
+  <h3>{{ match.counterparty or '상대 미확인' }}</h3>
+  <p>{% if match.call_started_at %}
+    {{ match.call_started_at.astimezone(call_timezone).strftime('%Y-%m-%d %H:%M:%S') }}
+    {% else %}통화 시각 미확인{% endif %} · 합성 전사</p>
+  <blockquote>{{ match.segment.text }}</blockquote>
+  <a href="/recordings/{{ match.recording_id }}/transcripts/{{ match.artifact_id }}#segment-{{ match.segment.segment_id }}">
+    근거 구간 열기 ({{ match.segment.start }} ~ {{ match.segment.end }}초)
+  </a>
+</article>
+{% else %}<p>일치하는 전사 구간이 없습니다.</p>{% endfor %}
+{% endif %}
+</html>
