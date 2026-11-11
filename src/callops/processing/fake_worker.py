@@ -5,8 +5,10 @@ Tests supply an ASGI client so the actual API/auth/DB code runs offline.
 This synchronous worker is for short synthetic jobs, not a GPU process runner.
 """
 
+import io
 import json
 import os
+import wave
 from uuid import uuid4
 
 from ..common import digest, identifier
@@ -54,7 +56,13 @@ class FakeWorker:
         self.call('POST', path + '/start', lease=lease, json={'request_id': str(uuid4())})
         result = {name: job[name] for name in ('job_id', 'input_sha256', 'input_artifact_id', 'input_artifact_version')}
         result.update(attempt_id=job['copy_key'], schema_version=1, synthetic=True)
-        result['text'] = 'synthetic test result'
+        if job['stage'] == 'STT':
+            with wave.open(io.BytesIO(data), 'rb') as audio:
+                duration = audio.getnframes() / audio.getframerate()
+            result.update(schema_version=2, segments=[{'segment_id': 1, 'start': 0, 'end': duration,
+                                                       'text': 'synthetic test result'}])
+        else:
+            result['text'] = 'synthetic test result'
         payload = json.dumps(result, sort_keys=True).encode()
         spool = self.root / (key + '.spool')
         with spool.open('xb') as output:

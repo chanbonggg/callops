@@ -1,4 +1,4 @@
-"""Browser views for reviewing calls."""
+"""Browser views for reviewing calls and transcript evidence."""
 
 from datetime import timedelta
 from pathlib import Path
@@ -30,6 +30,16 @@ def routes(service):
                                 form.get('call_started_at', ''))
         return RedirectResponse('/', status_code=302)
 
+    def detail(request):
+        row, artifact, result = service.transcript(request.path_params['recording_id'],
+                                                   request.path_params.get('artifact_id'))
+        audio_available = (row['received_at'] + timedelta(days=30) > service.clock()
+                           and service.audio_path(row).is_file())
+        return TEMPLATES.TemplateResponse(request, 'detail.html', {
+            'row': row, 'artifact': artifact, 'result': result, 'audio_available': audio_available,
+            'call_timezone': CALL_TIMEZONE,
+        })
+
     def audio(request):
         with service.transaction() as conn:
             row = service.recording(conn, request.path_params['recording_id'])
@@ -50,6 +60,8 @@ def routes(service):
     return [
         Route('/', index),
         Route('/recordings/{recording_id:uuid}/metadata', metadata, methods=['POST']),
+        Route('/recordings/{recording_id:uuid}', detail),
+        Route('/recordings/{recording_id:uuid}/transcripts/{artifact_id:uuid}', detail, name='transcript'),
         Route('/recordings/{recording_id:uuid}/audio', audio),
         Route('/recordings/{recording_id:uuid}/classify', classify, methods=['POST']),
     ]

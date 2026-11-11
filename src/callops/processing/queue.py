@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 from ..common import Conflict, digest, identifier, valid_hash
+from .transcript import validate_result
 
 
 class Queue:
@@ -189,28 +190,22 @@ class Queue:
                 raise Conflict('REQUEST_CONFLICT')
             if attempt['result_artifact_id'] is not None:
                 return {'accepted': True, 'artifact_id': str(attempt['result_artifact_id'])}
-            _, _, _, artifact, version = self.active(conn, job, attempt)
+            _, input_sha, _, artifact, version = self.active(conn, job, attempt)
             if job['status'] != 'UPLOADING':
                 raise Conflict('INVALID_STATE')
             try:
-                payload = json.loads(data)
-                if (not isinstance(payload, dict)
-                        or set(payload) != {'schema_version', 'job_id', 'attempt_id', 'input_artifact_id',
-                                            'input_artifact_version', 'input_sha256', 'synthetic', 'text'}
-                        or type(payload.get('schema_version')) is not int or payload.get('schema_version') != 1
-                        or payload.get('job_id') != str(job['id'])
+                recording = self.service.recording(conn, job['recording_id'])
+                payload = validate_result(json.loads(data), job['stage'], recording['duration_seconds'])
+                if (payload.get('job_id') != str(job['id'])
                         or payload.get('attempt_id') != str(attempt['id'])
                         or payload.get('input_artifact_id') != (str(artifact) if artifact else None)
                         or type(payload.get('input_artifact_version')) is not int
                         or payload.get('input_artifact_version') != version
-                        or payload.get('input_sha256') != self.input_info(conn, job, self.service.recording(conn, job['recording_id']))[1]
-                        or payload.get('synthetic') is not True
-                        or not isinstance(payload.get('text'), str) or len(payload['text']) > 100000):
+                        or payload.get('input_sha256') != input_sha):
                     raise ValueError
             except (ValueError, UnicodeError, RecursionError):
                 raise Conflict('INVALID_RESULT') from None
-            # P3 only accepts explicitly synthetic results. P4/P5 add the real
-            # segment/evidence validators before allowing production model output.
+            # Synthetic results exercise storage and review without a model runtime.
             artifact_id = uuid4()
             part = self.service.safe_path('artifacts', str(artifact_id) + '.part')
             target = self.service.safe_path('artifacts', str(artifact_id))

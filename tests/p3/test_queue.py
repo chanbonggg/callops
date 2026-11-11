@@ -79,6 +79,11 @@ class QueueTests(ProductCase):
         first = worker.once()
         self.assertTrue(first['accepted'])
         self.assertEqual(list(root.iterdir()), [])
+        self.login()
+        page = self.http('GET', '/recordings/' + recording)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('합성 전사', page.text)
+        self.assertIn('#segment-1', page.text)
         # Restart the worker; analysis fetches the immutable server artifact.
         second = FakeWorker(self.http, self.tokens['one'], root, lambda: self.now).once()
         self.assertTrue(second['accepted'])

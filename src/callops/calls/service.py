@@ -1,6 +1,7 @@
 """Single-server ingestion, classification and copy accounting. No AI adapters."""
 
 import hashlib
+import json
 import os
 import re
 import stat
@@ -13,6 +14,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from ..common import Conflict, digest, identifier, utcnow, valid_hash
+from ..processing.transcript import validate_result
 
 CALL_TIMEZONE = timezone(timedelta(hours=9))
 
@@ -129,6 +131,50 @@ class Service:
         query += ' ORDER BY received_at DESC, id DESC LIMIT 200'
         with self.transaction() as conn:
             return conn.execute(query, values).fetchall()
+
+    def transcript(self, recording_id, artifact_id=None):
+        with self.transaction() as conn:
+            row = self.recording(conn, recording_id)
+            if (row['classification_status'] in ('PRIVATE_EXCLUDED', 'EXPIRED')
+                    or row['deletion_state'] != 'NONE'
+                    or (row['classification_status'] != 'BUSINESS_APPROVED' and row['expires_at'] <= self.clock())):
+                raise Conflict('RECORDING_UNAVAILABLE')
+            query = '''SELECT f.* FROM callops.artifacts f
+                JOIN callops.attempts a ON a.result_artifact_id=f.id
+                JOIN callops.jobs j ON j.id=a.job_id
+                WHERE j.recording_id=%s AND f.recording_id=j.recording_id AND j.stage='STT' '''
+            values = [row['id']]
+            if artifact_id is not None:
+                query += 'AND f.id=%s '
+                values.append(identifier(artifact_id))
+            query += 'ORDER BY j.pipeline_version DESC LIMIT 1'
+            artifact = conn.execute(query, values).fetchone()
+            if artifact is None:
+                if artifact_id is not None:
+                    raise Conflict('TRANSCRIPT_NOT_FOUND')
+                return row, None, None
+            if row['classification_status'] != 'BUSINESS_APPROVED':
+                raise Conflict('APPROVAL_REVOKED')
+            return row, artifact, self.read_transcript_artifact(artifact, row['duration_seconds'])
+
+    def read_transcript_artifact(self, artifact, duration_seconds):
+        """Read an authorized artifact while the caller holds the transaction."""
+        if not artifact['available'] or artifact['expires_at'] <= self.clock():
+            raise Conflict('TRANSCRIPT_UNAVAILABLE')
+        size = artifact['size_bytes']
+        if size <= 0:
+            raise Conflict('INPUT_CORRUPT')
+        try:
+            with self.safe_path('artifacts', str(artifact['id'])).open('rb') as incoming:
+                data = incoming.read(size + 1)
+        except FileNotFoundError:
+            raise Conflict('INPUT_MISSING') from None
+        if len(data) != size or digest(data) != artifact['sha256']:
+            raise Conflict('INPUT_CORRUPT')
+        try:
+            return validate_result(json.loads(data), 'STT', duration_seconds)
+        except (ValueError, UnicodeError, RecursionError):
+            raise Conflict('INPUT_CORRUPT') from None
 
     def ingest(self, name, completed_sha256):
         """Producer supplies a checksum only after closing its completed transfer.

@@ -1,0 +1,25 @@
+<!doctype html><html lang="ko"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>CallOps 통화 상세</title>
+<a href="/">통화 목록</a><h1>{{ row.counterparty or '상대 미확인' }} 통화 상세</h1>
+<p>{{ row.id }} · {{ row.classification_status }}</p>
+<p>통화 시각 한국 시간
+{% if row.call_started_at %}{{ row.call_started_at.astimezone(call_timezone).strftime('%Y-%m-%d %H:%M:%S') }}
+{% else %}미확인{% endif %}</p>
+{% if audio_available %}
+<audio controls preload="none" src="/recordings/{{ row.id }}/audio"></audio>
+{% else %}<p>원음을 재생할 수 없습니다.</p>{% endif %}
+{% if result %}
+<h2>합성 전사</h2><p>서버 기능 검증용 가상 결과입니다.</p>
+<p>전사 버전 {{ artifact.version }} · {{ artifact.id }}</p>
+{% if result.schema_version == 2 %}
+{% for segment in result.segments %}
+<article id="segment-{{ segment.segment_id }}">
+<h3>구간 {{ segment.segment_id }} · {{ segment.start }} ~ {{ segment.end }}초</h3>
+<p>{{ segment.text }}</p>
+<a href="/recordings/{{ row.id }}/transcripts/{{ artifact.id }}#segment-{{ segment.segment_id }}">이 근거 링크</a>
+{% if audio_available %}
+ · <a href="/recordings/{{ row.id }}/audio#t={{ segment.start }},{{ segment.end }}">해당 원음 구간 열기</a>
+{% endif %}</article>
+{% else %}<p>전사 구간이 없는 합성 결과입니다.</p>{% endfor %}
+{% else %}<p>시간 구간이 없는 합성 결과</p><p>{{ result.text }}</p>{% endif %}
+{% else %}<p>전사 결과가 아직 없습니다.</p>{% endif %}</html>
