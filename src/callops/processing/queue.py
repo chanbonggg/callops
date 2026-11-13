@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 from ..common import Conflict, digest, identifier, valid_hash
+from ..schedule.service import store_candidates, validated_events
 from .transcript import validate_result
 
 
@@ -73,9 +74,10 @@ class Queue:
                     continue
                 attempt, token = uuid4(), uuid4()
                 conn.execute('''INSERT INTO callops.attempts
-                    (id,job_id,worker_id,lease_token,lease_until,preparation_deadline)
-                    VALUES (%s,%s,%s,%s,%s,%s)''',
-                    (attempt, job['id'], worker, token, now + timedelta(minutes=5), min(now + timedelta(minutes=10), expires)))
+                    (id,job_id,recording_id,worker_id,lease_token,lease_until,preparation_deadline)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)''',
+                    (attempt, job['id'], job['recording_id'], worker, token, now + timedelta(minutes=5),
+                     min(now + timedelta(minutes=10), expires)))
                 conn.execute("UPDATE callops.jobs SET status='PREPARING',active_attempt=%s,error_code=NULL WHERE id=%s", (attempt, job['id']))
                 return dict(job_id=str(job['id']), stage=job['stage'], lease_token=str(token),
                             copy_key=str(attempt), input_sha256=sha, input_artifact_id=str(artifact) if artifact else None,
@@ -190,9 +192,10 @@ class Queue:
                 raise Conflict('REQUEST_CONFLICT')
             if attempt['result_artifact_id'] is not None:
                 return {'accepted': True, 'artifact_id': str(attempt['result_artifact_id'])}
-            _, input_sha, _, artifact, version = self.active(conn, job, attempt)
+            _, input_sha, input_expires_at, artifact, version = self.active(conn, job, attempt)
             if job['status'] != 'UPLOADING':
                 raise Conflict('INVALID_STATE')
+            candidates = []
             try:
                 recording = self.service.recording(conn, job['recording_id'])
                 payload = validate_result(json.loads(data), job['stage'], recording['duration_seconds'])
@@ -203,7 +206,16 @@ class Queue:
                         or payload.get('input_artifact_version') != version
                         or payload.get('input_sha256') != input_sha):
                     raise ValueError
-            except (ValueError, UnicodeError, RecursionError):
+                if job['stage'] == 'ANALYSIS' and payload['schema_version'] == 2:
+                    source = conn.execute('SELECT * FROM callops.artifacts WHERE id=%s AND recording_id=%s',
+                                          (artifact, recording['id'])).fetchone()
+                    if source is None:
+                        raise ValueError('Invalid transcript source')
+                    transcript = self.service.read_transcript_artifact(source, recording['duration_seconds'])
+                    candidates = validated_events(payload['events'], transcript)
+            except Conflict:
+                raise
+            except (ValueError, OverflowError, RecursionError):
                 raise Conflict('INVALID_RESULT') from None
             # Synthetic results exercise storage and review without a model runtime.
             artifact_id = uuid4()
@@ -216,11 +228,19 @@ class Queue:
             os.replace(part, target)
             conn.execute('''INSERT INTO callops.artifacts (id,recording_id,version,sha256,size_bytes,expires_at)
                 VALUES (%s,%s,%s,%s,%s,%s)''', (artifact_id, job['recording_id'], job['pipeline_version'], sha, len(data), self.service.clock() + timedelta(days=90)))
-            conn.execute('UPDATE callops.attempts SET result_artifact_id=%s,cleanup_requested=true WHERE id=%s', (artifact_id, attempt['id']))
-            conn.execute("UPDATE callops.jobs SET status='SUCCEEDED' WHERE id=%s", (job['id'],))
             if job['stage'] == 'STT':
                 conn.execute('''INSERT INTO callops.jobs (id,recording_id,stage,input_artifact_id,pipeline_version,retry_at)
                     VALUES (%s,%s,'ANALYSIS',%s,%s,%s)''', (uuid4(), job['recording_id'], artifact_id, job['pipeline_version'], self.service.clock()))
+            if candidates:
+                store_candidates(conn, job, input_expires_at, candidates)
+            try:
+                self.active(conn, job, attempt)
+            except Conflict:
+                # This transaction has not published the result and will roll back.
+                target.unlink(missing_ok=True)
+                raise
+            conn.execute('UPDATE callops.attempts SET result_artifact_id=%s,cleanup_requested=true WHERE id=%s', (artifact_id, attempt['id']))
+            conn.execute("UPDATE callops.jobs SET status='SUCCEEDED' WHERE id=%s", (job['id'],))
             return {'accepted': True, 'artifact_id': str(artifact_id)}
 
     def cleanup(self, worker, body=None):

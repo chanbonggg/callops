@@ -40,7 +40,7 @@ class FakeWorker:
                 path.unlink(missing_ok=True)
             self.call('POST', '/worker/cleanup', json={**item, 'stopped': True, 'removed': True})
 
-    def once(self):
+    def once(self, *, transcript_text='synthetic test result', events=None):
         self.clean()
         job = self.call('POST', '/worker/claim').json()
         if job is None:
@@ -60,7 +60,9 @@ class FakeWorker:
             with wave.open(io.BytesIO(data), 'rb') as audio:
                 duration = audio.getnframes() / audio.getframerate()
             result.update(schema_version=2, segments=[{'segment_id': 1, 'start': 0, 'end': duration,
-                                                       'text': 'synthetic test result'}])
+                                                       'text': transcript_text}])
+        elif events is not None:
+            result.update(schema_version=2, events=events)
         else:
             result['text'] = 'synthetic test result'
         payload = json.dumps(result, sort_keys=True).encode()

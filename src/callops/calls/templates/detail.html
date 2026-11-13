@@ -2,6 +2,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>CallOps 통화 상세</title>
 <a href="/">통화 목록</a><h1>{{ row.counterparty or '상대 미확인' }} 통화 상세</h1>
 <p>{{ row.id }} · {{ row.classification_status }}</p>
+{% if row.classification_status == 'BUSINESS_APPROVED' %}
+<p><a href="/recordings/{{ row.id }}/schedule">일정 후보 검토</a></p>
+{% endif %}
 <p>통화 시각 한국 시간
 {% if row.call_started_at %}{{ row.call_started_at.astimezone(call_timezone).strftime('%Y-%m-%d %H:%M:%S') }}
 {% else %}미확인{% endif %}</p>

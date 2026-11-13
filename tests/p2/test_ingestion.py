@@ -92,6 +92,27 @@ class IngestionTests(ProductCase):
             with patch.object(Path, 'lstat', lstat), self.assertRaises(Conflict):
                 self.service.safe_path('sync-inbox', 'linked.wav')
 
+    def test_replaced_rejected_file_gets_its_own_cleanup_deadline(self):
+        path = self.service.safe_path('sync-inbox', 'replaced-rejected.wav')
+        path.write_bytes(b'invalid first generation')
+        with self.assertRaises(Conflict):
+            self.service.ingest(path.name, digest(path.read_bytes()))
+        self.advance(hours=23, minutes=59)
+        replacement = self.wav()
+        path.write_bytes(replacement)
+        stale_hash = digest(b'invalid first generation')
+        with self.assertRaisesRegex(Conflict, 'TRANSFER_INCOMPLETE'):
+            self.service.ingest(path.name, stale_hash)
+        self.advance(minutes=1)
+        self.service.maintain()
+        self.assertEqual(path.read_bytes(), replacement)
+        self.advance(hours=12)
+        with self.assertRaisesRegex(Conflict, 'TRANSFER_INCOMPLETE'):
+            self.service.ingest(path.name, stale_hash)
+        self.advance(hours=11, minutes=59)
+        self.service.maintain()
+        self.assertFalse(path.exists())
+
     def test_deferred_expiry_does_not_extend_and_get_does_not_mutate(self):
         recording = self.ingest()
         expires = self.row(recording)['expires_at']
@@ -172,6 +193,32 @@ class IngestionTests(ProductCase):
         source.unlink()
         self.service.maintain()
         self.assertEqual(self.row(recording)['deletion_state'], 'COMPLETE')
+
+    def test_private_cleanup_continues_when_an_inbox_path_is_reused(self):
+        from callops.processing.fake_worker import FakeWorker
+
+        original = self.wav()
+        recording = self.ingest(original, 'verified-reuse.wav')
+        self.assertEqual(self.ingest(original, 'unverified-reuse.wav'), recording)
+        self.service.classify(recording, 'BUSINESS_APPROVED')
+        worker = FakeWorker(self.http, self.tokens['one'], Path(self.temp.name) / 'fake-worker', lambda: self.now)
+        artifacts = [self.service.safe_path('artifacts', worker.once()['artifact_id']) for _ in range(2)]
+        verified = self.wav()
+        unverified = self.wav()
+        self.assertNotEqual(self.ingest(verified, 'verified-reuse.wav'), recording)
+        path = self.service.safe_path('sync-inbox', 'unverified-reuse.wav')
+        path.write_bytes(unverified)
+
+        self.service.classify(recording, 'PRIVATE_EXCLUDED')
+        self.assertFalse(any(artifact.exists() for artifact in artifacts))
+        self.assertFalse(self.service.audio_path(self.row(recording)).exists())
+        self.assertEqual(self.row(recording)['deletion_state'], 'RETRY_WAIT')
+        self.assertEqual(path.read_bytes(), unverified)
+
+        self.assertNotEqual(self.ingest(unverified, path.name), recording)
+        self.assertEqual(self.row(recording)['deletion_state'], 'COMPLETE')
+        self.assertEqual(path.read_bytes(), unverified)
+        self.assertEqual(self.service.safe_path('sync-inbox', 'verified-reuse.wav').read_bytes(), verified)
 
     def test_db_failure_stops_ingestion_and_recovery_removes_orphans(self):
         data = self.wav()

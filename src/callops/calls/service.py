@@ -233,6 +233,9 @@ class Service:
                         (id,sha256,size_bytes,storage_key,duration_seconds,received_at,expires_at)
                         VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *''',
                         (uuid4(), completed_sha256, size, key, duration, now, now + timedelta(hours=72))).fetchone()
+                # A verified transfer replaced any previous content at this path.
+                conn.execute('''UPDATE callops.receipts SET cleaned=true
+                    WHERE source_name=%s AND recording_id<>%s AND NOT cleaned''', (name, row['id']))
                 conn.execute('INSERT INTO callops.receipts (id,recording_id,source_name) VALUES (%s,%s,%s)',
                              (uuid4(), row['id'], name))
                 conn.execute('DELETE FROM callops.rejected_receipts WHERE source_name=%s', (name,))
@@ -245,9 +248,12 @@ class Service:
                 info = source.stat()
                 identity = f'{info.st_ino}:{info.st_size}:{info.st_mtime_ns}'
                 with self.transaction() as conn:
-                    conn.execute('''INSERT INTO callops.rejected_receipts (source_name,identity,expires_at)
+                    conn.execute('''INSERT INTO callops.rejected_receipts AS previous (source_name,identity,expires_at)
                         VALUES (%s,%s,%s) ON CONFLICT (source_name) DO UPDATE SET
-                        identity=EXCLUDED.identity,expires_at=LEAST(callops.rejected_receipts.expires_at,EXCLUDED.expires_at)''',
+                        identity=EXCLUDED.identity,
+                        expires_at=CASE WHEN previous.identity=EXCLUDED.identity
+                            THEN LEAST(previous.expires_at,EXCLUDED.expires_at) ELSE EXCLUDED.expires_at END,
+                        cleanup_failed=previous.identity=EXCLUDED.identity AND previous.cleanup_failed''',
                         (name, identity, now + timedelta(hours=24)))
             raise
         finally:
@@ -284,6 +290,10 @@ class Service:
         conn.execute('''UPDATE callops.recordings SET deletion_state='REQUESTED',
             counterparty=NULL,call_started_at=NULL,call_time_source=NULL,call_time_trusted=false
             WHERE id=%s''', (recording_id,))
+        conn.execute('DELETE FROM callops.schedule_candidates WHERE recording_id=%s', (recording_id,))
+        conn.execute('''UPDATE callops.schedules SET recording_id=NULL,title=NULL,start_at=NULL,end_at=NULL,
+            approved_candidate_id=NULL,approved_revision=NULL,deleted_at=%s,revision=revision+1
+            WHERE recording_id=%s''', (self.clock(), recording_id))
         conn.execute("UPDATE callops.jobs SET status='CANCELLED' WHERE recording_id=%s", (recording_id,))
         conn.execute('''UPDATE callops.attempts SET cleanup_requested=true WHERE job_id IN
             (SELECT id FROM callops.jobs WHERE recording_id=%s)''', (recording_id,))
@@ -295,6 +305,7 @@ class Service:
         is deliberately not connected until C7 can prove it stops incoming writes.
         """
         with self.transaction() as conn:
+            conn.execute('DELETE FROM callops.schedule_candidates WHERE expires_at<=%s', (self.clock(),))
             for rejected in conn.execute('SELECT * FROM callops.rejected_receipts WHERE expires_at<=%s', (self.clock(),)).fetchall():
                 try:
                     path = self.safe_path('sync-inbox', rejected['source_name'])
@@ -313,9 +324,13 @@ class Service:
             for row in expired:
                 self.request_delete(conn, row['id'])
             for row in conn.execute("SELECT * FROM callops.recordings WHERE deletion_state IN ('REQUESTED','RETRY_WAIT') FOR UPDATE").fetchall():
+                state = 'COMPLETE'
                 try:
                     self.audio_path(row).unlink(missing_ok=True)
-                    for receipt in conn.execute('SELECT * FROM callops.receipts WHERE recording_id=%s AND NOT cleaned', (row['id'],)).fetchall():
+                except (OSError, Conflict):
+                    state = 'RETRY_WAIT'
+                for receipt in conn.execute('SELECT * FROM callops.receipts WHERE recording_id=%s AND NOT cleaned', (row['id'],)).fetchall():
+                    try:
                         path = self.safe_path('sync-inbox', receipt['source_name'])
                         if path.exists():
                             with path.open('rb') as incoming:
@@ -323,15 +338,20 @@ class Service:
                                     # A reused name is another transfer, never delete it.
                                     raise Conflict('SOURCE_REPLACED')
                             path.unlink()
+                    except (OSError, Conflict):
+                        state = 'RETRY_WAIT'
+                    else:
                         conn.execute('UPDATE callops.receipts SET cleaned=true WHERE id=%s', (receipt['id'],))
-                    for artifact in conn.execute('SELECT id FROM callops.artifacts WHERE recording_id=%s', (row['id'],)).fetchall():
+                for artifact in conn.execute('SELECT id FROM callops.artifacts WHERE recording_id=%s', (row['id'],)).fetchall():
+                    try:
                         self.safe_path('artifacts', str(artifact['id'])).unlink(missing_ok=True)
-                    conn.execute('UPDATE callops.artifacts SET available=false WHERE recording_id=%s', (row['id'],))
-                    pending = conn.execute('''SELECT 1 FROM callops.attempts a JOIN callops.jobs j ON j.id=a.job_id
-                        WHERE j.recording_id=%s AND NOT a.cleaned LIMIT 1''', (row['id'],)).fetchone()
-                    state = 'REQUESTED' if pending else 'COMPLETE'
-                except (OSError, Conflict):
-                    state = 'RETRY_WAIT'
+                    except (OSError, Conflict):
+                        state = 'RETRY_WAIT'
+                    else:
+                        conn.execute('UPDATE callops.artifacts SET available=false WHERE id=%s', (artifact['id'],))
+                if state == 'COMPLETE' and conn.execute('''SELECT 1 FROM callops.attempts a JOIN callops.jobs j ON j.id=a.job_id
+                    WHERE j.recording_id=%s AND NOT a.cleaned LIMIT 1''', (row['id'],)).fetchone():
+                    state = 'REQUESTED'
                 conn.execute('UPDATE callops.recordings SET deletion_state=%s WHERE id=%s', (state, row['id']))
 
     def recover(self):

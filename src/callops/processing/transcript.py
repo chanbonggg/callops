@@ -1,4 +1,4 @@
-"""Schemas for legacy and timestamped synthetic worker results."""
+"""Envelopes for synthetic worker results."""
 
 ENVELOPE_FIELDS = {'schema_version', 'job_id', 'attempt_id', 'input_artifact_id',
                    'input_artifact_version', 'input_sha256', 'synthetic'}
@@ -39,6 +39,9 @@ def validate_result(payload, stage, duration):
         if set(payload) != ENVELOPE_FIELDS | {'segments'}:
             raise ValueError('Invalid timestamped result')
         validate_segments(payload['segments'], duration)
+    elif payload['schema_version'] == 2 and stage == 'ANALYSIS':
+        if set(payload) != ENVELOPE_FIELDS | {'events'}:
+            raise ValueError('Invalid synthetic analysis result')
     else:
         raise ValueError('Unsupported result schema')
     return payload
