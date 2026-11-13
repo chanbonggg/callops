@@ -1,6 +1,7 @@
-"""Authenticated browser review of schedule candidates."""
+"""Authenticated browser and API routes for schedules."""
 
 from pathlib import Path
+from uuid import uuid4
 
 from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
@@ -9,7 +10,7 @@ from starlette.templating import Jinja2Templates
 from ..calls.service import CALL_TIMEZONE
 from ..common import Conflict
 from .calendar import send_schedule
-from .manual import change_manual_schedule, create_manual_schedule
+from .manual import change_manual_schedule, create_manual_schedule, get_manual_schedule
 from .service import change_candidate, list_schedules, review_candidates
 
 
@@ -29,6 +30,12 @@ CALENDAR_ERRORS = {
     'CALENDAR_EVENT_MISMATCH': '기존 모의 일정의 내용이 일치하지 않습니다. 등록 결과를 확인하세요.',
     'INPUT_MISSING': '전사 근거를 확인할 수 없어 전송하지 않았습니다.',
     'INPUT_CORRUPT': '전사 근거를 확인할 수 없어 전송하지 않았습니다.',
+}
+MANUAL_CONFLICTS = {
+    'MANUAL_SCHEDULE_REQUEST_CONFLICT': '이미 사용된 등록 요청입니다. 목록에서 등록 여부를 확인해 주세요.',
+    'STALE_MANUAL_SCHEDULE': '다른 탭에서 이 일정을 수정하거나 삭제했습니다.',
+    'MANUAL_SCHEDULE_NOT_FOUND': '이 일정을 찾을 수 없습니다. 목록에서 확인해 주세요.',
+    'INVALID_SCHEDULE_ACTION': '요청을 처리할 수 없습니다. 목록에서 일정을 다시 열어 주세요.',
 }
 
 
@@ -99,8 +106,59 @@ def routes(service, owner):
             return JSONResponse({'error': str(error)}, status_code=404)
         return Response(status_code=204) if row is None else JSONResponse(schedule_json(row))
 
+    def manual_form(request, mode, form=None, error=None, status_code=200):
+        return TEMPLATES.TemplateResponse(request, 'manual.html', {
+            'mode': mode, 'form': form or {}, 'error': error,
+            'schedule_id': request.path_params.get('schedule_id'), 'csrf': request.state.login['csrf'],
+        }, status_code=status_code)
+
+    def manual_new_page(request):
+        if request.method in ('GET', 'HEAD'):
+            return manual_form(request, 'create', {'request_id': uuid4()})
+        form = request.state.form
+        try:
+            create_manual_schedule(service, form)
+        except Conflict as error:
+            if str(error) == 'INVALID_ID':
+                return manual_form(request, 'create', form | {'request_id': uuid4()},
+                                   '등록 요청을 다시 확인해 주세요.', 409)
+            return manual_form_error(request, 'create', form, error)
+        return RedirectResponse('/schedules', status_code=303)
+
+    def manual_form_error(request, mode, form, error):
+        if str(error) == 'INVALID_SCHEDULE_FIELDS':
+            return manual_form(request, mode, form, FORM_ERRORS[str(error)], 409)
+        message = MANUAL_CONFLICTS.get(str(error))
+        if message is None:
+            raise error
+        return manual_form(request, 'conflict', error=message, status_code=409)
+
+    def manual_item_page(request):
+        schedule_id = request.path_params['schedule_id']
+        mode = 'delete' if request.scope['route'].name == 'manual_schedule_delete' else 'edit'
+        if request.method in ('GET', 'HEAD'):
+            row = get_manual_schedule(service, schedule_id)
+            if row is None:
+                return manual_form(request, 'missing', error=MANUAL_CONFLICTS['MANUAL_SCHEDULE_NOT_FOUND'],
+                                   status_code=404)
+            form = {'title': row['title'], 'revision': row['revision']}
+            for field in ('start', 'end'):
+                local = row[f'{field}_at'].astimezone(CALL_TIMEZONE)
+                form[field] = local.replace(tzinfo=None).isoformat(timespec='seconds' if local.second else 'minutes')
+            return manual_form(request, mode, form)
+        form = request.state.form
+        try:
+            change_manual_schedule(service, schedule_id, form | {'action': mode})
+        except Conflict as error:
+            return manual_form_error(request, mode, form, error)
+        return RedirectResponse('/schedules', status_code=303)
+
     return [Route('/recordings/{recording_id:uuid}/schedule', page),
             Route('/recordings/{recording_id:uuid}/schedule/{candidate_id:uuid}', submit, methods=['POST']),
             Route('/schedules', schedules), Route('/schedules/{candidate_id:uuid}/send', send, methods=['POST']),
+            Route('/schedules/manual/new', manual_new_page, methods=['GET', 'POST']),
+            Route('/schedules/manual/{schedule_id:uuid}', manual_item_page, methods=['GET', 'POST']),
+            Route('/schedules/manual/{schedule_id:uuid}/delete', manual_item_page, methods=['GET', 'POST'],
+                  name='manual_schedule_delete'),
             Route('/api/schedules', schedule_api), Route('/api/schedules/manual', manual_create, methods=['POST']),
             Route('/api/schedules/manual/{schedule_id:uuid}', manual_change, methods=['POST'])]

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
@@ -54,6 +55,61 @@ class ScheduleCandidateTests(ProductCase):
             return conn.execute('''SELECT d.*, e.event_id, e.payload_sha256 AS event_sha256
                 FROM callops.calendar_deliveries d LEFT JOIN callops.mock_calendar_events e ON e.event_id=d.logical_item_id
                 WHERE d.logical_item_id=%s''', (event_id,)).fetchone()
+
+    def remove_manual_schedule(self, request_id):
+        with self.service.transaction() as conn:
+            conn.execute("DELETE FROM callops.schedules WHERE source='manual' AND request_id=%s", (request_id,))
+
+    def test_manual_schedule_web_lifecycle_and_stale_edit(self):
+        create = '/schedules/manual/new'
+        self.assertEqual(self.http('GET', create).status_code, 401)
+        csrf = self.login()
+        self.assertIn(f'href="{create}"', self.http('GET', '/schedules').text)
+        page = self.http('GET', create)
+        self.assertEqual(page.status_code, 200)
+        request_id = re.search(r'name="request_id" value="([^"]+)"', page.text)[1]
+        self.addCleanup(self.remove_manual_schedule, request_id)
+        form = {'request_id': request_id, 'title': '<가상 검토 일정>',
+                'start': '2030-01-02T23:55:15', 'end': '2030-01-03T00:15'}
+        self.assertEqual(self.http('POST', create, data=form).status_code, 403)
+        form['csrf'] = csrf
+        bad_end = '2030-01-02T23:40'
+        invalid = self.http('POST', create, data=form | {'end': bad_end})
+        self.assertEqual(invalid.status_code, 409)
+        for value in (request_id, '&lt;가상 검토 일정&gt;', form['start'], bad_end):
+            self.assertIn(f'value="{value}"', invalid.text)
+
+        for _ in range(2):
+            response = self.http('POST', create, data=form)
+            self.assertEqual((response.status_code, response.headers['location']), (303, '/schedules'))
+        schedule, = self.http('GET', '/api/schedules').json()['schedules']
+        self.assertEqual(schedule['start_at'], '2030-01-02T14:55:15+00:00')
+        path = f'/schedules/manual/{schedule["id"]}'
+        self.assertIn(f'href="{path}"', self.http('GET', '/schedules').text)
+        edit_page = self.http('GET', path)
+        self.assertIn(f'value="{form["start"]}"', edit_page.text)
+        self.assertIn(f'href="{path}/delete"', edit_page.text)
+        revision = re.search(r'name="revision" value="([^"]+)"', edit_page.text)[1]
+        edit = form | {'revision': revision, 'title': '수정한 검토 일정'}
+        response = self.http('POST', path, data=edit)
+        self.assertEqual((response.status_code, response.headers['location']), (303, '/schedules'))
+        stale = self.http('POST', path, data=edit | {'title': '이전 탭 제목'})
+        self.assertEqual(stale.status_code, 409)
+        self.assertIn('href="/schedules"', stale.text)
+        self.assertNotIn('name="revision"', stale.text)
+
+        delete = f'{path}/delete'
+        confirm = self.http('GET', delete)
+        self.assertEqual(confirm.status_code, 200)
+        self.assertIn(edit['title'], confirm.text)
+        latest_revision = re.search(r'name="revision" value="([^"]+)"', confirm.text)[1]
+        self.assertEqual(self.http('POST', delete, data={'csrf': csrf, 'revision': revision}).status_code, 409)
+        self.assertEqual(self.http('POST', delete, data={'revision': latest_revision}).status_code, 403)
+        response = self.http('POST', delete, data={'csrf': csrf, 'revision': latest_revision})
+        self.assertEqual((response.status_code, response.headers['location']), (303, '/schedules'))
+        self.assertEqual(self.http('POST', path, data=edit | {'revision': latest_revision}).status_code, 409)
+        self.assertEqual(self.http('GET', path).status_code, 404)
+        self.assertEqual(self.http('GET', '/api/schedules').json()['schedules'], [])
 
     def test_manual_schedule_crud_shares_list_and_keeps_approved_call(self):
         event = self.event(end='2030-01-03T15:00:00+09:00')
@@ -249,6 +305,9 @@ class ScheduleCandidateTests(ProductCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn('가상 방문 &lt;승인&gt;', page.text)
         self.assertIn(f'/recordings/{recording}/transcripts/{artifact}#segment-1', page.text)
+        manual_path = f'/schedules/manual/{first["logical_item_id"]}'
+        self.assertNotIn(f'href="{manual_path}"', page.text)
+        self.assertEqual(self.http('GET', manual_path).status_code, 404)
         self.assertNotIn('가상 미승인', page.text)
         self.assertNotIn('가상 거절', page.text)
         for blocked in (second, third):

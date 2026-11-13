@@ -1,0 +1,57 @@
+{% extends "layout.html" %}
+{% set heading = {
+  'create': '일정 등록',
+  'edit': '일정 수정',
+  'delete': '일정 삭제',
+  'conflict': '일정이 변경되었습니다',
+  'missing': '일정을 찾을 수 없습니다',
+}[mode] %}
+{% block title %}{{ heading }}{% endblock %}
+{% block content %}
+  <a class="back" href="/schedules"><img src="/task-assets/back.svg" width="15" height="15" alt="">일정 목록</a>
+  <h1>{{ heading }}</h1>
+  {% if mode in ('create', 'edit') %}
+    <form method="post" class="card">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% if mode == 'create' %}
+        <input type="hidden" name="request_id" value="{{ form.request_id }}">
+      {% else %}
+        <input type="hidden" name="revision" value="{{ form.revision }}">
+      {% endif %}
+      <label for="schedule-title">제목</label>
+      <input id="schedule-title" name="title" placeholder="일정 제목" value="{{ form.get('title', '') }}"
+             required maxlength="160" {% if error %}aria-describedby="schedule-error"{% endif %}>
+      {% for name, label in [('start', '시작'), ('end', '종료')] %}
+        <label for="schedule-{{ name }}">{{ label }} <small>필수 · 한국 시간</small></label>
+        <input id="schedule-{{ name }}" name="{{ name }}" value="{{ form.get(name, '') }}" required
+               {% if error %}placeholder="예: 2026-11-19T15:00" aria-describedby="schedule-error"{% else %}type="datetime-local" step="1"{% endif %}>
+      {% endfor %}
+      {% if error %}<p class="error" id="schedule-error" role="alert">{{ error }}</p>{% endif %}
+      <div class="actions">
+        <a class="button secondary" href="/schedules">취소</a>
+        <button class="primary">{{ '등록' if mode == 'create' else '저장' }}</button>
+      </div>
+    </form>
+    {% if mode == 'edit' %}
+      <a class="button danger standalone" href="/schedules/manual/{{ schedule_id }}/delete">일정 삭제</a>
+    {% endif %}
+  {% elif mode == 'delete' %}
+    <form method="post" class="card">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="revision" value="{{ form.revision }}">
+      <strong>{{ form.title }}</strong>
+      <p class="hint">{{ form.start|replace('T', ' ') }}–{{ form.end|replace('T', ' ') }} · 한국 시간</p>
+      <p>이 일정을 삭제할까요?</p>
+      <div class="actions">
+        <a class="button secondary" href="/schedules/manual/{{ schedule_id }}">취소</a>
+        <button class="danger">삭제</button>
+      </div>
+    </form>
+  {% else %}
+    <div class="card" role="alert">
+      {% if mode == 'conflict' %}<strong>최신 일정을 확인해 주세요.</strong>{% endif %}
+      {% if error %}<p>{{ error }}</p>{% endif %}
+      <a class="button primary standalone" href="/schedules">최신 일정 목록</a>
+    </div>
+  {% endif %}
+{% endblock %}

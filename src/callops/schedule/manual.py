@@ -21,6 +21,12 @@ def manual_fields(form):
     return title, start, end
 
 
+def get_manual_schedule(service, schedule_id):
+    with service.transaction() as conn:
+        return conn.execute(f'''SELECT {MANUAL_FIELDS} FROM callops.schedules
+            WHERE id=%s AND source='manual' AND deleted_at IS NULL''', (schedule_id,)).fetchone()
+
+
 def create_manual_schedule(service, form):
     request_id = identifier(form.get('request_id'))
     fields = manual_fields(form)

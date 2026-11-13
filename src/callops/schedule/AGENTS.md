@@ -2,12 +2,13 @@
 
 ## 책임과 구현 의도
 
-통화 분석에서 나온 합성 일정의 근거 검증, 후보 편집·승인·거절, 승인 목록과 모의 Calendar 전송을 맡는다. 후보의 승인 상태와 Calendar 등록 상태를 별도로 저장한다. `service.py`는 후보와 승인, `calendar.py`는 목록과 모의 등록, `routes.py`와 `templates/`는 웹 검토를 담당한다. [일정과 모의 Calendar 계약](../../../docs/p2-p3-server.md#승인된-일정과-모의-calendar)
+통화 분석에서 나온 합성 일정의 근거 검증, 후보 편집·승인·거절, 통합 목록, 직접 입력 일정 관리와 모의 Calendar 전송을 맡는다. 후보의 승인 상태와 Calendar 등록 상태를 별도로 저장한다. `service.py`는 후보와 승인, `calendar.py`는 모의 등록, `routes.py`와 `templates/`는 웹 화면을 담당한다. [일정과 모의 Calendar 계약](../../../docs/p2-p3-server.md#승인된-일정과-모의-calendar)
 
 ## 상태와 전송 흐름
 
 - 분석 결과를 받을 때 해당 작업에 고정된 전사의 구간 ID를 검증하고, 제목·시간·시간 표현·근거가 동일한 후보를 하나로 합친다. 시간이 빠진 후보는 `NEEDS_CONFIRMATION`으로 둔다.
 - `schedules`는 직접 입력과 통화 일정의 현재 값을 소유한다. `manual.py`는 등록 키로 재전송을 구분하고, 수정·삭제 시 현재 일정 revision을 검사한다. 삭제 시 제목·시각을 지우고 재등록 방지 키를 유지한다. [직접 입력 일정 API](../../../docs/p2-p3-server.md#직접-입력-일정-api)
+- 직접 입력 일정의 HTML 폼과 JSON API는 `manual.py`의 입력 검증과 저장 로직을 공유한다. 오류 화면에서는 제출값을 유지하고 다른 탭의 변경과 충돌하면 최신 목록으로 안내한다. [직접 입력 일정 화면](../../../docs/p2-p3-server.md#직접-입력-일정-화면)
 - 후보를 편집하면 후보 revision을 올리고 승인을 다시 받는다. 채택한 승인 스냅샷은 일정의 `approved_candidate_id`·`approved_revision`으로 참조한다. `logical_item_id`는 `schedules.id`를 가리키며 후보 편집·재승인에도 유지한다.
 - `/schedules`와 `/api/schedules`는 현재 일정을 조회하고 유효한 근거를 덧붙인다. 통화 일정의 별도 POST 전송은 채택한 후보와 승인 버전을 재확인하고 `calendar_deliveries`에 `UNKNOWN`을 예약한다. 모의 이벤트 생성과 전송 완료 기록은 별도 트랜잭션이다.
 - 전송 재시도는 같은 `logical_item_id`의 이벤트를 먼저 조회한다. 등록된 해시와 전송 기록이 일치하면 완료로 확정한다. 미등록이 확인되면 유효한 최신 승인·기한·전사 무결성을 다시 검사하고 생성한다. 승인 내용을 수정해도 이미 등록된 이벤트 ID를 재사용한다.

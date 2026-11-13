@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} · CallOps</title>
+  <link rel="stylesheet" href="/task-assets/tasks.css">
+</head>
+<body>
+  <header class="app-header">
+    <a href="/" class="wordmark"><span><img src="/task-assets/wave.svg" width="21" height="21" alt=""></span>CallOps</a>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <nav class="app-nav" aria-label="주 메뉴">
+  {% for url, icon, label in [('/', 'calls', '통화'), ('/search', 'search', '전사 검색'),
+                              ('/schedules', 'calendar', '일정'), ('/tasks', 'tasks', '할 일')] %}
+    <a href="{{ url }}"{% if icon == 'calendar' %} aria-current="page"{% endif %}>
+      <img src="/task-assets/{{ icon }}.svg" width="19" height="19" alt="">{{ label }}
+    </a>
+  {% endfor %}
+  </nav>
+</body>
+</html>
