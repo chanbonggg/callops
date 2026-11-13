@@ -70,6 +70,7 @@ callops/
     processing/                 # 작업 큐·워커 API·결과 스키마
     search/                     # 승인된 전사의 검색과 근거 링크
     schedule/                   # 일정 후보 검토·편집·승인 기록
+    tasks.py                    # 직접 입력 할 일 화면·API와 상태 관리
     common.py                   # 모듈이 공유하는 식별자·해시·오류
     config.py, db.py            # 서버 설정·DB 마이그레이션
   ai-worker/                    # 데스크톱 모델 실행 코드
@@ -83,7 +84,7 @@ callops/
 
 공용 n8n Compose는 서버 공용 인프라 디렉터리에서 관리한다. CallOps를 배포·제거할 때 n8n과 다른 자동화가 함께 중지되지 않아야 한다.
 
-서버는 Python 3.12·Starlette·Uvicorn·PostgreSQL로 구성하는 모듈러 모놀리스다. 인증·통화·처리·전사 검색·일정 모듈을 한 웹 앱에서 실행하고 하나의 PostgreSQL DB를 사용한다. 통화 모듈은 분류와 녹음 수명주기를 담당하며, 처리 모듈은 통화의 승인 상태와 저장 경로를 사용해 작업을 처리한다. 전사 검색은 업무 승인된 통화의 유효한 전사에서 키워드를 찾고 출처 링크를 제공한다. 일정 모듈은 합성 후보와 승인 기록을 관리하고 승인된 일정을 모의 Calendar로 전송한다. 브라우저 화면은 Jinja로 서버에서 렌더링한다. 서버 워커 API는 가짜 워커로 검증하며 데스크톱 AI는 단독 실행 단계다. DB 의존성은 psycopg 3.3.3이며 로컬 검증은 PostgreSQL 18.0을 사용한다.
+서버는 Python 3.12·Starlette·Uvicorn·PostgreSQL로 구성하는 모듈러 모놀리스다. 인증·통화·처리·전사 검색·일정·할 일 모듈을 한 웹 앱에서 실행하고 하나의 PostgreSQL DB를 사용한다. 통화 모듈은 분류와 녹음 수명주기를 담당하며, 처리 모듈은 통화의 승인 상태와 저장 경로를 사용해 작업을 처리한다. 전사 검색은 업무 승인된 통화의 유효한 전사에서 키워드를 찾고 출처 링크를 제공한다. 일정 모듈은 합성 후보와 승인 기록을 관리하고 승인된 일정을 모의 Calendar로 전송한다. 브라우저 화면은 Jinja로 서버에서 렌더링한다. 서버 워커 API는 가짜 워커로 검증하며 데스크톱 AI는 단독 실행 단계다. DB 의존성은 psycopg 3.3.3이며 로컬 검증은 PostgreSQL 18.0을 사용한다.
 
 ## 4. 책임별 개발 순서와 의존 관계
 
@@ -115,7 +116,7 @@ P2에서는 UI로 직접 분류하므로 실제 알림 채널이나 공용 n8n�
 | candidates/revisions | 유형, 초안, 근거 구간, 불확실 사유, revision, approval_status, logical_item_id, 재분석 연결/신규 결정 이력 |
 | approvals | 사용자, 대상 revision, 승인한 값의 스냅샷·해시, 시각 |
 | schedules | 안정적인 일정 ID, 직접 입력 또는 통화 출처, 현재 제목·시작·종료·revision, 채택한 승인 버전, 삭제 시각 |
-| tasks | id, recording_id, logical_item_id UNIQUE, source_candidate_id UNIQUE, 승인 revision, 제목, 기한(없으면 null), status, revision, 완료/취소 시각, open_expires_at, expires_at; 근거 원문 중복 저장 금지 |
+| tasks | 직접 입력은 id, request_id UNIQUE, 제목, 기한(없으면 null), status, revision, 완료/삭제 시각을 사용한다. 통화 후보 승인 단계에서 recording_id, logical_item_id, source_candidate_id, 승인 revision, 취소 시각과 보관기한을 연결한다. 근거 원문 중복 저장 금지 |
 | deliveries | 알림/외부 작업 ID, logical_item_id, 상태, 종료 사유, retry_allowed, 재시도 시각, 외부 ID, 요청 해시 |
 | deletion_records | 콘텐츠 해시·scope(AUDIO_ONLY / DERIVED_ONLY / RECORDING_ALL)·복사본·청소 확인·수신 제외·만료 조건 |
 | workers | worker_id, heartbeat, 가용 모델, 현재 작업, 최소 운영 지표 |

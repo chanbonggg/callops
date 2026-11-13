@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ {'list': '할 일', 'edit': '할 일 수정', 'delete': '할 일 삭제', 'notice': '할 일 안내'}[mode] }} · CallOps</title>
+  <link rel="stylesheet" href="/task-assets/tasks.css">
+  <script src="/task-assets/tasks.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <a href="/" class="wordmark"><span><img src="/task-assets/wave.svg" width="21" height="21" alt=""></span>CallOps</a>
+  </header>
+  <main>
+  {% if mode != 'list' %}
+    <a class="back" href="/tasks"><img src="/task-assets/back.svg" width="15" height="15" alt="">할 일 목록</a>
+  {% endif %}
+  {% if mode == 'list' %}
+    <div>
+      <h1>할 일</h1>
+      <p class="hint">기한은 한국 시간 기준입니다.</p>
+    </div>
+    <form method="post" action="/tasks" class="card" id="new-task">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="request_id" value="{{ form.request_id }}">
+      <label for="new-title">새 할 일</label>
+      <input id="new-title" name="title" placeholder="할 일 제목" required maxlength="160"
+             value="{{ form.get('title', '') }}" {% if error %}aria-describedby="form-error"{% endif %}>
+      {% if error %}<p class="error" id="form-error" role="alert">{{ error }}</p>{% endif %}
+      <div class="fields" id="new-due-fields" {% if not form.get('due') and not error %}data-collapsible{% endif %}>
+        <label for="new-due">기한 <small>선택 · 한국 시간</small></label>
+        <input id="new-due" name="due" value="{{ form.get('due', '') }}"
+               {% if error %}placeholder="예: 2026-11-16T14:00" aria-describedby="form-error"{% else %}type="datetime-local" step="1"{% endif %}>
+      </div>
+      <div class="actions">
+        <button type="button" class="secondary" id="toggle-due" aria-controls="new-due-fields" hidden>기한 설정</button>
+        <button class="primary">추가</button>
+      </div>
+    </form>
+    {% for heading, tasks in [('미완료', open_tasks), ('완료', done_tasks)] %}
+    <section class="task-group">
+      <h2>{{ heading }} <span class="count">{{ tasks|length }}</span></h2>
+      <ul>
+      {% for task in tasks %}
+        <li class="task-row">
+          <div class="task-info{% if task.status == 'DONE' %} done{% endif %}">
+            <span class="status-icon" aria-hidden="true">
+              {% if task.status == 'DONE' %}<img src="/task-assets/check.svg" width="15" height="15" alt="">{% endif %}
+            </span>
+            <div><strong>{{ task.title }}</strong><p class="hint">{{ due_label(task.due_at) }}</p></div>
+          </div>
+          {% if task.status == 'OPEN' %}
+          <form method="post" action="/tasks/{{ task.id }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="revision" value="{{ task.revision }}">
+            <button class="quiet" name="action" value="complete" aria-label="{{ task.title }} 완료">완료</button>
+          </form>
+          {% endif %}
+          <a class="button secondary" href="/tasks/{{ task.id }}" aria-label="{{ task.title }} 수정">수정</a>
+        </li>
+      {% else %}
+        <li class="empty">{{ heading }} 할 일이 없어요.</li>
+      {% endfor %}
+      </ul>
+    </section>
+    {% endfor %}
+  {% elif mode == 'edit' %}
+    <h1>할 일 수정</h1>
+    <form method="post" action="/tasks/{{ task_id }}" class="card">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="revision" value="{{ form.revision }}">
+      <label for="edit-title">제목</label>
+      <input id="edit-title" name="title" value="{{ form.get('title', '') }}" required maxlength="160"
+             {% if error %}aria-describedby="form-error"{% endif %}>
+      {% if error %}<p class="error" id="form-error" role="alert">{{ error }}</p>{% endif %}
+      <label for="edit-due">기한 <small>선택 · 한국 시간</small></label>
+      <input id="edit-due" name="due" value="{{ form.get('due', '') }}"
+             {% if error %}placeholder="예: 2026-11-16T14:00" aria-describedby="form-error"{% else %}type="datetime-local" step="1"{% endif %}>
+      <button type="button" class="secondary clear-due" data-clear-due="edit-due" hidden>기한 지우기</button>
+      <div class="actions">
+        <a class="button secondary" href="/tasks">취소</a>
+        <button class="primary" name="action" value="edit">저장</button>
+      </div>
+    </form>
+    <a class="button danger standalone" href="/tasks/{{ task_id }}?delete=1">할 일 삭제</a>
+  {% elif mode == 'delete' %}
+    <h1>할 일 삭제</h1>
+    <form method="post" action="/tasks/{{ task_id }}" class="card">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="revision" value="{{ form.revision }}">
+      <strong>{{ form.title }}</strong>
+      <p class="hint">이 할 일을 삭제할까요? 삭제한 할 일은 목록에서 사라집니다.</p>
+      <div class="actions">
+        <a class="button secondary" href="/tasks/{{ task_id }}">취소</a>
+        <button class="danger" name="action" value="delete">삭제</button>
+      </div>
+    </form>
+  {% else %}
+    <h1>할 일 안내</h1>
+    <div class="notice" role="alert">
+      <strong>{{ message }}</strong>
+      {% if detail %}<p>{{ detail }}</p>{% endif %}
+      <a class="button secondary" href="/tasks">최신 목록 다시 불러오기</a>
+    </div>
+    {% if form and ('title' in form or 'due' in form) %}
+    <div class="card">
+      <label for="saved-title">제목</label>
+      <input id="saved-title" value="{{ form.get('title', '') }}" readonly>
+      <label for="saved-due">기한 <small>선택 · 한국 시간</small></label>
+      <input id="saved-due" value="{{ form.get('due', '') }}" readonly>
+    </div>
+    {% endif %}
+  {% endif %}
+  </main>
+  <nav class="app-nav" aria-label="주 메뉴">
+  {% for url, icon, label in [('/', 'calls', '통화'), ('/search', 'search', '전사 검색'),
+                              ('/schedules', 'calendar', '일정'), ('/tasks', 'tasks', '할 일')] %}
+    <a href="{{ url }}"{% if icon == 'tasks' %} aria-current="page"{% endif %}>
+      <img src="/task-assets/{{ icon }}.svg" width="19" height="19" alt="">{{ label }}
+    </a>
+  {% endfor %}
+  </nav>
+</body>
+</html>

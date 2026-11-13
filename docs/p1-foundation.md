@@ -48,6 +48,7 @@ python scripts/manage.py check
 - 트랜잭션 자문 잠금으로 동시 마이그레이션을 직렬화하고 실패한 SQL의 DDL/이력은 함께 롤백한다. 기존 마이그레이션 수정 대신 다음 번호 파일을 추가한다.
 - 파괴적 down migration이나 데이터 초기화 명령은 제공하지 않는다. `002_ingestion_queue.sql`은 P2 수집·P3 큐, `003_recording_metadata.sql`은 상대 이름 열, `004_schedule_candidates.sql`은 일정 후보와 승인 기록, `005_mock_calendar.sql`은 모의 전송 상태와 이벤트 식별 기록, `006_manual_schedules.sql`은 직접 입력 일정을 추가한다.
 - `007_schedule_model.sql`은 직접 입력 일정을 `schedules`로 옮기고 통화 일정의 마지막 승인 내용을 이관한다. 기존 일정과 모의 이벤트 ID를 보존한다. `008_processing_integrity.sql`은 실행 시도에 통화 ID를 채우고 작업·입력·결과가 같은 통화에 속하도록 외래 키를 적용한다.
+- [009_manual_tasks.sql](../migrations/009_manual_tasks.sql)은 직접 입력 할 일의 기한·상태·revision과 등록 재시도 방지 키를 저장할 `tasks` 테이블을 추가한다.
 
 ## 검증 대상
 
