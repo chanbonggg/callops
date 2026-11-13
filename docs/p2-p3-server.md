@@ -4,7 +4,7 @@
 
 ## 실행 환경
 
-Python 3.12와 [requirements.txt](../requirements.txt)의 psycopg·Starlette·Uvicorn을 사용한다. 인증, 통화 관리, 워커 API는 한 ASGI 앱에 등록하고 Jinja로 브라우저 화면을 렌더링한다. DB 준비와 역할 분리는 [P1 안내](p1-foundation.md)를 따른다. `008_processing_integrity.sql`까지 명시적으로 마이그레이션해야 앱이 시작된다.
+Python 3.12와 [requirements.txt](../requirements.txt)의 psycopg·Starlette·Uvicorn을 사용한다. 인증, 통화 관리, 워커 API는 한 ASGI 앱에 등록하고 Jinja로 브라우저 화면을 렌더링한다. DB 준비와 역할 분리는 [P1 안내](p1-foundation.md)를 따른다. `009_manual_tasks.sql`까지 명시적으로 마이그레이션해야 앱이 시작된다.
 
 ```text
 python -m pip install -r requirements.txt
@@ -132,6 +132,12 @@ worker.once(events=[{
 
 이 경로는 로컬 PostgreSQL의 모의 제공자를 사용한다. 실제 Google Calendar와 OAuth, 할 일 관리는 후속 범위다.
 
+### 직접 입력 일정 화면
+
+일정 목록(`/schedules`)에서 **새 일정**을 열고 제목, 시작·종료 시각을 입력한다. 표시와 입력은 한국 시간 기준이며 종료는 시작보다 늦어야 한다. 직접 입력 일정의 **수정**에서 기존 값을 편집하고, **일정 삭제**를 누르면 별도의 확인 화면을 연다. 통화에서 승인된 일정은 같은 목록에서 전사 근거 조회와 모의 전송을 제공한다. [승인된 Figma 시안](https://www.figma.com/design/FTB08BRgu0d4mXnIWlg8MP?node-id=9-595)
+
+등록(`/schedules/manual/new`), 수정(`/schedules/manual/{id}`), 삭제 확인(`/schedules/manual/{id}/delete`) 화면은 각 주소에 폼을 제출한다. 아래 API와 같은 입력 검증과 저장 로직을 사용한다. 입력 오류 시 제출값과 등록 키 또는 편집 revision을 유지하고, 다른 탭에서 먼저 변경했다면 제출을 거부하고 **최신 일정 목록**으로 안내한다. 저장·삭제에 성공하면 목록으로 이동한다.
+
 ### 직접 입력 일정 API
 
 로그인한 세션으로 조회하고, 쓰기 요청에는 `application/x-www-form-urlencoded` 본문과 `csrf`를 제출한다. `start`와 `end`는 `YYYY-MM-DDTHH:MM` 형식의 한국 시간이며 초를 붙일 수 있다. 둘 다 입력하고 종료는 시작보다 늦어야 한다. JSON 응답의 `start_at`과 `end_at`은 UTC로 반환한다.
@@ -143,7 +149,27 @@ worker.once(events=[{
 | `POST /api/schedules/manual/{id}` | `action=edit`와 현재 `revision`, `title`, `start`, `end`를 보내면 수정한 일정과 새 revision을 반환한다. |
 | `POST /api/schedules/manual/{id}` | `action=delete`와 현재 `revision`으로 삭제한다. 성공과 동일 삭제 요청 재시도는 204다. |
 
-`id`는 서버가 발급한다. 오래된 revision과 다른 내용으로 재사용한 등록 키는 409로 거부한다. 삭제 시 제목과 시각을 지우고, 이전 요청의 재전송으로 되살아나지 않도록 ID·등록 요청 키·revision·삭제 시각을 유지한다. 직접 입력 일정은 CallOps 내부 일정이며, 기존 모의 Calendar 전송은 통화 후보 승인 경로를 사용한다. 직접 입력·수정 폼은 후속 View 작업 범위다.
+`id`는 서버가 발급한다. 오래된 revision과 다른 내용으로 재사용한 등록 키는 409로 거부한다. 삭제 시 제목과 시각을 지우고, 이전 요청의 재전송으로 되살아나지 않도록 ID·등록 요청 키·revision·삭제 시각을 유지한다. 직접 입력 일정은 CallOps 내부 일정이며, 기존 모의 Calendar 전송은 통화 후보 승인 경로를 사용한다.
+
+### 직접 입력 할 일 화면
+
+로그인 후 통화 목록의 **할 일 목록**을 열면 `/tasks`에서 미완료와 완료를 볼 수 있다. 제목만 입력해 추가하거나 한국 시간 기준 기한을 함께 설정한다. **수정**에서 제목·기한을 바꾸거나 **기한 지우기**를 누르고 저장한다. 미완료만 완료할 수 있으며, 수정 화면에서 삭제 확인으로 이동한다.
+
+HTML 폼과 아래 JSON API는 같은 입력 검증과 저장 함수를 쓴다. 입력 오류는 입력값과 등록 키 또는 편집 revision을 유지한다. 다른 탭에서 먼저 변경했다면 이전 제출을 거부하고 최신 목록으로 돌아가는 링크를 표시한다. [승인된 Figma 화면](https://www.figma.com/design/FTB08BRgu0d4mXnIWlg8MP?node-id=3-301)
+
+### 직접 입력 할 일 API
+
+`tasks`에 제목, 선택 기한, 상태(`OPEN` 또는 `DONE`), `revision`, 완료 시각을 저장한다. 소유자 세션이 필요하고 POST는 폼으로 `csrf`를 보낸다. `due`는 한국 시간 기준 `YYYY-MM-DDTHH:MM` 또는 초까지 포함한 일시다. 생략하거나 빈 문자열을 보내면 기한은 `null`이다. 응답의 `due_at`과 `completed_at`은 UTC ISO 일시 또는 `null`이다.
+
+| 요청 | 폼 필드 | 성공 응답 |
+|---|---|---|
+| `GET /api/tasks` | 없음 | 200. `csrf`와 삭제되지 않은 `tasks` 목록 |
+| `POST /api/tasks` | `request_id`(UUID), `title`, `due`(선택) | 201. 서버가 발급한 `id`와 `revision=1`. 수정 전 같은 입력 재전송은 200과 기존 항목 |
+| `POST /api/tasks/{id}` | `action=edit`, `revision`, `title`, `due`(선택) | 200. 제목과 기한을 수정하고 revision 증가 |
+| `POST /api/tasks/{id}` | `action=complete`, `revision` | 200. `OPEN`을 `DONE`으로 바꾸고 완료 시각 기록 및 revision 증가 |
+| `POST /api/tasks/{id}` | `action=delete`, `revision` | 204. 내용 삭제. 같은 삭제 요청의 재전송도 204 |
+
+오래된 revision, 이미 완료한 항목의 재완료, 다른 내용으로 사용한 등록 키는 409로 거부한다. 없는 항목은 404를 반환한다. 삭제된 항목의 제목·기한·상태·완료 시각을 비우고 ID·등록 키·revision·삭제 시각을 보존해 지연된 등록 재시도를 막는다. 통화 후보 연결과 보관 만료는 후속 단계다. [마이그레이션](../migrations/009_manual_tasks.sql) · [화면·API 검증](../tests/p3/test_tasks.py)
 
 ## 확인 범위
 
