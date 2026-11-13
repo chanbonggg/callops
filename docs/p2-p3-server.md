@@ -4,7 +4,7 @@
 
 ## 실행 환경
 
-Python 3.12와 [requirements.txt](../requirements.txt)의 psycopg·Starlette·Uvicorn을 사용한다. 인증, 통화 관리, 워커 API는 한 ASGI 앱에 등록하고 Jinja로 브라우저 화면을 렌더링한다. DB 준비와 역할 분리는 [P1 안내](p1-foundation.md)를 따른다. `003_recording_metadata.sql`까지 명시적으로 마이그레이션해야 앱이 시작된다.
+Python 3.12와 [requirements.txt](../requirements.txt)의 psycopg·Starlette·Uvicorn을 사용한다. 인증, 통화 관리, 워커 API는 한 ASGI 앱에 등록하고 Jinja로 브라우저 화면을 렌더링한다. DB 준비와 역할 분리는 [P1 안내](p1-foundation.md)를 따른다. `008_processing_integrity.sql`까지 명시적으로 마이그레이션해야 앱이 시작된다.
 
 ```text
 python -m pip install -r requirements.txt
@@ -13,7 +13,7 @@ python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P2
 python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3
 ```
 
-마지막 두 명령은 각각 새 테스트 클러스터를 생성하고 `scripts/check.py --phase P2/P3`를 실행한 뒤 정리한다. 기존 서비스·운영 DB는 사용하지 않는다. CI는 새 PostgreSQL 18.6 서비스에서 `--service --phase P3`를 실행하도록 구성했다. Windows 로컬 검증 대상은 PostgreSQL 18.0이며 원격 CI는 아직 실행하지 않았다.
+마지막 두 명령은 각각 새 테스트 클러스터를 생성하고 `scripts/check.py --phase P2/P3`를 실행한 뒤 정리한다. 로컬 검증에는 Windows PostgreSQL 18.0을 사용한다. 미리 준비한 빈 전용 테스트 DB를 사용하는 실행 방법은 하네스 안내를 따른다. [하네스 실행](harness.md#실행)
 
 ## 수집·분류
 
@@ -22,8 +22,8 @@ python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3
 - 수신 도구가 파일을 닫고 완료를 확정한 뒤 제공한 SHA-256을 입력한다. 앱이 파일 크기 안정만 보고 완료 신호를 만들어내지 않는다. 복사 전후 속성·두 번의 해시·격리 사본 판독을 검사한다.
 - SHA-256으로 녹음을 중복 제거하고 수신별 사본을 기록한다. 파일명은 화면·로그에 노출하지 않으며 경로 구분자·스트림·심볼릭 링크·Windows reparse point를 거부한다. 전용 루트와 그 상위 디렉터리는 신뢰된 서비스 계정만 수정할 수 있어야 한다. 실제 ACL 구성은 C1/C7 검증 대상이다.
 - 미분류·보류는 최초 수신 72시간 후 만료한다. 보류는 기한을 연장하지 않는다. 업무 분류와 STT 작업 INSERT는 같은 트랜잭션이다. 중복 승인으로 작업을 늘리지 않는다.
-- 사적 선택/미분류 만료는 inbox·격리·파생 파일을 청소한다. 삭제 실패나 워커 미확인은 완료로 표시하지 않는다. 같은 콘텐츠의 재수신은 새 AI 작업 없이 청소한다. 이름이 재사용되어 다른 콘텐츠가 들어오면 기존 삭제 요청으로 지우지 않는다.
-- 거부된 파일은 처음 거부한 때부터 24시간 청소 대상으로 등록한다. 파일 정체성이 바뀌면 청소 실패로 남기며 새 파일을 임의 삭제하지 않는다.
+- 사적 선택/미분류 만료는 inbox·격리·파생 파일을 복사본별로 청소한다. 한 사본에서 실패해도 나머지는 정리하며, 실패나 워커 미확인이 남으면 완료로 표시하지 않는다. 같은 이름의 새 수신 파일은 보존한다. 새 콘텐츠 수신이 검증되면 해당 경로의 이전 수신 기록을 정리된 것으로 표시한다.
+- 거부된 파일은 처음 거부한 때부터 24시간 청소 대상으로 등록한다. 같은 파일을 다시 거부해도 기한은 연장되지 않는다. 같은 경로에서 교체된 파일이 새로 거부되면 새 파일 기준으로 24시간을 계산한다.
 
 가짜 파일을 전용 inbox에 수신 완료한 뒤 사용하는 명령:
 
@@ -77,13 +77,13 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 
 실행 오류는 초기 시도와 추가 3회(1/5/30분) 후 수동 확인으로 멈춘다. 파일 대기·오프라인 임대 만료는 모델 실패 횟수에 넣지 않는다. 종료와 사본 삭제가 미확인인 워커는 다음 작업을 받지 않는다. 청소 조회/확인은 활성 임대 없이 자기 copy key와 요청 버전으로 수행한다.
 
-수락 파일은 part 기록·fsync·rename 후 artifact 참조, 작업 성공, 다음 분석 작업을 한 DB 트랜잭션으로 저장한다. 재시작 때 참조 없는 생성 파일을 정리하고, 참조 파일이 없으면 INPUT_MISSING으로 수동 확인한다. 프로세스/DB 실패 복구를 검증하며 전원 차단에 대한 파일시스템 내구성 시험은 하지 않았다.
+수락 파일은 part 기록·fsync·rename 후 artifact 참조, 작업 성공, 다음 분석 작업을 한 DB 트랜잭션으로 저장한다. 성공 확정 직전에 임대·업로드·입력 보관 기한을 다시 검사한다. 기한을 넘긴 결과는 후보와 DB 참조를 롤백하고 해당 파일을 삭제한다. 재시작 때 참조 없는 생성 파일을 정리하고, 참조 파일이 없으면 INPUT_MISSING으로 수동 확인한다. 프로세스/DB 실패 복구를 검증하며 전원 차단에 대한 파일시스템 내구성 시험은 하지 않았다.
 
-`src/callops/processing/fake_worker.py`는 실제 워커 API를 통해 합성 결과를 처리한다. 전사 ACK 후 로컬 파일을 지워도 새 워커가 서버 artifact를 받아 분석한다. 결과에는 job·attempt·input ID/버전/해시가 포함된다. 가짜 STT 워커는 PCM WAV의 길이와 가상 텍스트로 구간 결과를 만들고, 분석은 기존 합성 텍스트를 반환한다. 실제 모델과 장시간 워커 heartbeat 스레드·연산 프로세스 종료·지속 spool 재개는 P4/P5/D5 구현 대상이다.
+`src/callops/processing/fake_worker.py`는 실제 워커 API를 통해 합성 결과를 처리한다. 전사 ACK 후 로컬 파일을 지워도 새 워커가 서버 artifact를 받아 분석한다. 결과에는 job·attempt·input ID/버전/해시가 포함된다. 가짜 STT 워커는 PCM WAV의 길이와 가상 텍스트로 구간 결과를 만든다. 가짜 분석 워커는 기본으로 합성 텍스트를 반환하고, `events`를 명시하면 합성 일정 후보를 반환한다. 실제 모델과 장시간 워커 heartbeat 스레드·연산 프로세스 종료·지속 spool 재개는 P4/P5/D5 구현 대상이다.
 
 ### 합성 전사 결과 스키마와 조회
 
-공통 필드는 `schema_version`·`job_id`·`attempt_id`·`input_artifact_id`·`input_artifact_version`·`input_sha256`·`synthetic`다. `synthetic`은 true여야 한다. 기존 버전 1은 `text` 필드를 사용하며 STT·ANALYSIS 결과로 계속 수락한다. 버전 2는 STT 전용이며 `text` 대신 `segments`를 사용한다.
+공통 필드는 `schema_version`·`job_id`·`attempt_id`·`input_artifact_id`·`input_artifact_version`·`input_sha256`·`synthetic`다. `synthetic`은 true여야 한다. 기존 버전 1은 `text` 필드를 사용하며 STT·ANALYSIS 결과로 계속 수락한다. STT 버전 2는 `segments`, ANALYSIS 버전 2는 `events`를 사용한다.
 
 각 구간은 `segment_id`·`start`·`end`·`text`만 포함한다. ID는 1부터 연속된 정수이고 시작 시각은 비감소 순서다. 시각은 0부터 수신 시 검증한 음성 길이 이내이며 bool·비유한 값·역순·잘못된 범위를 거부한다. 최대 10,000구간·전체 텍스트 100,000자·결과 파일 8MiB를 적용한다. 빈 구간 배열은 구간 없는 합성 결과로 표시한다.
 
@@ -96,6 +96,54 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 로그인 후 통화 목록의 **전사 내용 검색**을 열면 거래처·한국 날짜 범위와 검색어를 입력할 수 있다. `POST /search`는 사용자 세션과 CSRF를 확인한다. 공백으로 나눈 검색어가 모두 포함된 한 전사 구간을 찾고, 최근 수신 통화 순으로 최대 5개를 표시한다. 결과는 전사 버전과 구간 ID에 고정된 상세 링크를 제공한다.
 
 업무 승인 상태, 삭제 여부와 최신 전사의 보관 기한을 확인하고 상세 화면과 같은 해시·스키마 검사를 적용한다. 검색 결과에서 유실·손상된 파일을 제외하고 화면에 일부 전사를 확인할 수 없다고 표시한다. 구간 정보가 있는 합성 전사가 검색 대상이다. 최근 수신 최대 50건과 파일 합계 16MiB를 확인하며 한도로 범위가 줄어들면 화면에 알린다. 검색 인덱스는 두지 않아 별도 전사 사본이 생기지 않는다.
+
+### 합성 일정 후보 검토
+
+통화 목록에서 업무 통화의 **전사 상세 → 일정 후보 검토**를 연다. 후보마다 전사 버전과 구간을 고정한 근거 링크가 표시된다. 제목과 시작·종료 시각은 한국 시간으로 수정한다. 시간이 비어 있으면 확인 필요 상태를 유지하고, 둘 다 저장한 뒤 별도로 승인한다. 이미 시작 시각이 지난 후보는 승인할 때 확인란을 선택해야 한다.
+
+ANALYSIS 버전 2의 `events`는 최대 10개다. 각 항목은 `title`, `start`, `end`, `time_hint`, `segment_ids`를 사용한다. `start`와 `end`는 시간대 오프셋이 포함된 ISO 일시 또는 null이며 종료는 시작보다 늦어야 한다. `time_hint`에는 통화의 시간 표현을 보존한다. 서버는 분석 작업에 고정된 버전 2 전사의 해시와 구간 ID를 확인한다. 같은 분석 결과 안에서 제목, UTC 기준 시각, 시간 표현, 근거 ID 집합이 모두 같은 후보는 한 건만 저장한다. 가짜 분석 입력은 시간을 직접 제공하고, 상대 날짜의 자동 해석과 실제 추출 품질 검증은 후속 작업이다.
+
+기존 워커 API에 연결한 `FakeWorker`로, 대기 중인 업무 녹음이 한 건인 합성 개발 DB에서 다음 순서로 결과를 만든다.
+
+```python
+worker.once(transcript_text='1월 3일 오후 2시에 견적 검토하러 방문할게요. 종료 시각은 다시 정하죠.')
+worker.once(events=[{
+    'title': '가상 거래처 견적 검토',
+    'start': '2030-01-03T14:00:00+09:00',
+    'end': None,
+    'time_hint': '1월 3일 오후 2시',
+    'segment_ids': [1],
+}])
+```
+
+후보 저장과 분석 결과 수락은 같은 PostgreSQL 트랜잭션으로 처리한다. 수정과 승인·거절은 사용자 세션, CSRF, 후보 revision과 업무 상태를 검사한다. 승인한 내용은 revision별로 저장하며 같은 revision의 승인 재시도는 기록을 추가하지 않는다. 승인한 후보를 수정하면 다시 검토한다. 통화를 사적으로 바꾸면 후보와 승인 기록도 삭제하며, 전사 기한이 지나면 후보 접근을 막고 `maintain`에서 정리한다.
+
+### 승인된 일정과 모의 Calendar
+
+통화 목록의 **일정 목록**(`/schedules`)은 `schedules`에서 직접 입력 일정과 통화 승인 일정을 시작 시각순으로 조회한다. 일정의 현재 값과 승인 스냅샷을 따로 저장한다. 후보를 편집 중일 때는 마지막으로 승인한 값이 목록에 남고 신규 전송은 차단된다. 재승인하면 같은 일정 ID의 현재 값이 갱신된다.
+
+통화 일정에는 유효한 승인 스냅샷의 근거 구간과 모의 전송 상태를 표시한다. **모의 Calendar로 전송**은 로그인·CSRF를 검사하는 별도 POST다. 서버는 현재 채택된 후보와 승인 revision, 통화의 업무 상태, 근거 보관 기한과 파일 무결성을 확인한다. 이미 시작한 일정의 신규 생성은 차단한다.
+
+기존 전송 경로 `POST /schedules/{candidate_id}/send`는 통합 목록의 `candidate_id`와 `approval_revision`을 사용한다. 목록의 `id`와 `revision`은 현재 일정의 키와 버전이다.
+
+전송 기록은 `calendar_deliveries`에 저장하며, 모의 Calendar는 `mock_calendar_events`에 이벤트 ID와 제목·시작·종료의 해시를 별도 트랜잭션으로 기록한다. 이벤트 ID는 내부 일정 ID를 재사용한다. 응답 유실 시 목록에 **전송 결과 확인 필요**를 표시한다. **등록 확인 후 재시도**는 기존 이벤트를 먼저 조회한다. 기존 이벤트의 해시가 일치하면 등록 완료로 확정하고, 등록되지 않은 것이 확인되면 현재 유효한 승인으로 생성한다. 이미 등록된 일정을 수정·재승인하면 기존 모의 등록과 변경 사실을 표시한다.
+
+전사 근거가 만료되면 현재 일정은 남고 합의 상세·근거 링크·신규 전송은 차단된다. 통화 전체 삭제나 사적 전환 시 일정의 제목·시각·원본 연결을 지운다. 이미 생성된 이벤트의 중복 방지를 위해 일정 ID와 전송 식별 기록을 유지한다.
+
+이 경로는 로컬 PostgreSQL의 모의 제공자를 사용한다. 실제 Google Calendar와 OAuth, 할 일 관리는 후속 범위다.
+
+### 직접 입력 일정 API
+
+로그인한 세션으로 조회하고, 쓰기 요청에는 `application/x-www-form-urlencoded` 본문과 `csrf`를 제출한다. `start`와 `end`는 `YYYY-MM-DDTHH:MM` 형식의 한국 시간이며 초를 붙일 수 있다. 둘 다 입력하고 종료는 시작보다 늦어야 한다. JSON 응답의 `start_at`과 `end_at`은 UTC로 반환한다.
+
+| 요청 | 입력과 동작 |
+|---|---|
+| `GET /api/schedules` | `csrf`와 `schedules`를 반환한다. `id`·`revision`은 현재 일정 기준이며 `source`는 `manual` 또는 `call`이다. 유효한 통화 근거의 `candidate_id`·`approval_revision`·`agreement`와 전송 가능 여부를 별도로 반환한다. |
+| `POST /api/schedules/manual` | `request_id` UUID, `title`, `start`, `end`로 등록한다. 최초 등록은 201, 등록 내용이 그대로인 동안 동일 요청 재전송은 기존 일정을 200으로 반환한다. |
+| `POST /api/schedules/manual/{id}` | `action=edit`와 현재 `revision`, `title`, `start`, `end`를 보내면 수정한 일정과 새 revision을 반환한다. |
+| `POST /api/schedules/manual/{id}` | `action=delete`와 현재 `revision`으로 삭제한다. 성공과 동일 삭제 요청 재시도는 204다. |
+
+`id`는 서버가 발급한다. 오래된 revision과 다른 내용으로 재사용한 등록 키는 409로 거부한다. 삭제 시 제목과 시각을 지우고, 이전 요청의 재전송으로 되살아나지 않도록 ID·등록 요청 키·revision·삭제 시각을 유지한다. 직접 입력 일정은 CallOps 내부 일정이며, 기존 모의 Calendar 전송은 통화 후보 승인 경로를 사용한다. 직접 입력·수정 폼은 후속 View 작업 범위다.
 
 ## 확인 범위
 

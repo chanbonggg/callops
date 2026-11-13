@@ -5,15 +5,21 @@
 - [README](README.md) → [하네스와 단계별 완료 기준](docs/harness.md)을 먼저 읽는다.
 - 기능·상태·보관 계약의 기준은 [프로젝트 계획](docs/01-project.md)이다. 해당 F/P 절만 추가로 읽는다.
 - GPU 설치는 [데스크톱 계획](docs/02-desktop.md), 공용 n8n은 [서버 계획](docs/03-server.md)을 따른다.
-- `docs/specs/01-recording-ingestion-classification.md`는 과거 초안이다. 최신 계획과 충돌하면 최신 계획을 따른다.
-- 사용자는 P1~P3 구현 착수를 지시했다. 같은 범위의 구현 승인을 반복 요청하지 않는다. 현재 하네스 구축은 제품 기능 완료를 뜻하지 않는다.
+- 구현 이력과 다음 작업은 [전체 진행 체크리스트](docs/progress-checklist.md)를 확인한다. 사용자가 이미 승인한 범위의 구현 승인은 반복 요청하지 않는다.
+
+## 모듈별 작업 지침
+
+현재 서버는 Starlette·Uvicorn과 PostgreSQL을 사용하는 모듈러 모놀리스다. 앱 조립과 공통 HTTP 설정은 [web.py](src/callops/web.py), 마이그레이션과 DB 시작 검사는 [db.py](src/callops/db.py)에 있다.
+
+- 웹 요청은 [인증](src/callops/auth/AGENTS.md), [통화](src/callops/calls/AGENTS.md), [전사 검색](src/callops/search/AGENTS.md), [일정](src/callops/schedule/AGENTS.md) 지침을 따른다.
+- 서버 작업 큐는 [처리](src/callops/processing/AGENTS.md), 로컬 모델 실험은 [데스크톱 AI](ai-worker/AGENTS.md)에서 시작한다.
 
 ## 개발 루프
 
 1. `git status --short`와 관련 코드·명세를 확인하고 기존 변경을 보존한다.
 2. 이번 변경의 입력·상태 전이·실패 조건을 정한다. 명세를 바꾸면 코드와 함께 갱신한다.
 3. 실제 구현을 호출하는 가장 작은 실패 재현 테스트를 작성하고 수정한다. 명세를 흉내 낸 별도 상태 머신을 테스트 대상으로 만들지 않는다.
-4. `python scripts/check.py`와 해당 단계의 `python scripts/check.py --phase P1`(또는 P2/P3)을 실행한다.
+4. `python scripts/check.py`를 실행한다. 서버 기능 변경은 `python scripts/test_postgres.py --pg-bin <PostgreSQL-bin-경로> --phase P3`로 임시 PostgreSQL을 준비해 검증한다. 변경 범위에 따라 `P1` 또는 `P2`를 선택할 수 있다. [검사 안내](docs/harness.md#실행)
 5. 변경·실행한 검사·미검증 경계를 보고한다. 누락/skip/환경 부재를 성공으로 보고하지 않는다.
 
 ## 반드시 유지할 경계
@@ -30,24 +36,10 @@
 ## 구현 선택
 
 - 하네스는 Python 3.12 표준 라이브러리로 실행한다. 제품 패키지 선택은 P1에서 근거와 함께 확정한다.
-- 초기 서버는 하나의 앱, 실제 워커는 하나다. Redis·새 브로커·에이전트 프레임워크는 현재 범위에 없다.
+- GPU 연동의 초기 구성은 워커 한 대를 기준으로 한다. Redis·새 브로커·에이전트 프레임워크는 현재 범위에 없다.
 - 시계는 주입/patch해 만료를 검증하고 실제 sleep을 쓰지 않는다. 외부 효과는 `unittest.mock`으로 관찰한다.
-- P1~P3에서는 가짜 데이터로 개발한다. 운영 배포·실기기·OAuth·드라이버 변경은 그 단계의 사용자 지시 범위를 확인한다.
+- 로컬 개발과 기본 테스트에는 합성 데이터와 모의 Calendar를 사용한다. 운영 배포, 운영 DB, 실기기, OAuth, 드라이버 또는 외부 서비스 변경은 해당 작업에 대한 사용자 지시 범위를 확인한다.
 
 근거: [공식 AGENTS.md 안내](https://learn.chatgpt.com/docs/agent-configuration/agents-md). 이 파일은 탐색과 실행 규칙이며 전체 제품 명세를 복제하지 않는다.
 
-<!-- AGENTFLOW MANAGED START -->
-# AgentFlow project guidance
-
-- Project: callops
-- Architecture: Inspect module boundaries; preserve existing architecture
-- Stack: Python, flask
-- Important directories/module boundaries: .github, deploy, docs, migrations, scripts, src, tests
-- Libraries/persistence/state/styling: postgres, sqlite
-- Commands: {"lint": null, "typecheck": null, "build": null, "test": null}
-- Roles: planner, supervisor
-- Follow existing naming, API, security and persistence conventions; inspect context.md.
-- Planning and final approval are mandatory. Prototype requires approval by default.
-- Do not deploy, mutate production data, send real mail, or charge payments.
-- Exchange approved artifacts, never private reasoning or other agents' conversations.
-<!-- AGENTFLOW MANAGED END -->
+# 무엇이든 수행 후 문서파일을 최신화 해야 하는 경우 최신화 진행. /docs 디렉토리 뿐 아니라 각 모듈의 agents.md도 포함

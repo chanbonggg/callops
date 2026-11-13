@@ -17,7 +17,7 @@ python scripts/check.py --phase P3
 
 `--phase P2`는 기본 검사와 P1·P2를 함께 실행한다. 단계 테스트가 없거나 skip/expectedFailure가 있으면 실패한다. P1~P3는 실제 테스트 DB가 필요하다. P1 DB 테스트는 빈 테스트 DB를 전제로 하므로 재실행 때 새 클러스터를 준비한다. [P2/P3 재현 명령](p2-p3-server.md)을 사용한다. 기본 검사의 녹색 결과를 기능 완료로 해석하지 않는다.
 
-GitHub Actions의 `harness-only`는 Windows/Ubuntu에서 기본 명령을 실행하고, `p1-p3-postgres`는 Ubuntu의 새 PostgreSQL 18.6 서비스에서 P1~P3를 실행하도록 구성했다. 로컬 검증은 Windows PostgreSQL 18.0 임시 클러스터로 수행한다. 원격 push·CI 실행은 아직 하지 않았다.
+현재 검증은 Windows PostgreSQL 18.0 임시 클러스터에서 수행한다. 미리 준비한 빈 전용 PostgreSQL을 사용할 때는 `python scripts/test_postgres.py --service --phase P3`를 쓸 수 있다. GitHub Actions 워크플로는 저장소에 구성되어 있지 않다.
 
 ## 파일의 역할
 
@@ -57,8 +57,4 @@ T04는 AI에 입력하지 않는 수집/분류 시험이고, T01-copy는 T01 파
 
 ## 현재 상태와 다음 작업
 
-- 승인 범위: 사용자 대화에서 P1~P3 구현 착수 지시, 이후 하네스 구축 요청.
-- 현재 제품 상태: P1 기반과 P2 인증·수집·분류·삭제, P3 큐·가짜 워커를 구현했다. 운영 배포·실제 모델·실기기 연동 완료를 뜻하지 않는다. [구현 경계](p2-p3-server.md)를 확인한다.
-- 로컬 검증(2026-11-11): 프로젝트 `.venv`의 Starlette 환경에서 `python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3` 통과. 하네스 7개·P1 3개·P2 16개·P3 20개, 총 46개이며 skip은 없다. 전사 키워드 검색의 권한, 거래처·날짜 필터, 손상·만료 제외와 고정 근거 링크를 추가 검증했다. 임시 클러스터를 종료·정리했다.
-- 다음 작업: 실제 STT/분석 검증(P4/P5)과 데스크톱 실행 환경·장시간 워커(D 단계)는 별도 범위다. C2/C7의 실제 수신 중단과 동기화 삭제 방향도 아직 미검증이다.
-- 단계가 끝나면 이 상태와 프로젝트 승인/구현 표를 함께 갱신하고 명령·결과·미검증 사항을 최종 답변에 보고한다. 별도 개발일지는 자동 생성하지 않는다.
+[전체 진행 체크리스트](progress-checklist.md)에서 관리한다. 이 문서는 검사 방법과 완료 기준을 관리한다. 단계 완료 시 체크리스트와 해당 기능의 검증 기록을 갱신하고, 승인 범위가 바뀔 때만 프로젝트 계약을 수정한다.
