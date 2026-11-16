@@ -113,7 +113,7 @@
   {% endif %}
   </main>
   <nav class="app-nav" aria-label="주 메뉴">
-  {% for url, icon, label in [('/', 'calls', '통화'), ('/search', 'search', '전사 검색'),
+  {% for url, icon, label in [('/', 'calls', '통화'), ('/questions', 'search', '전사 검색'),
                               ('/schedules', 'calendar', '일정'), ('/tasks', 'tasks', '할 일')] %}
     <a href="{{ url }}"{% if icon == 'tasks' %} aria-current="page"{% endif %}>
       <img src="/task-assets/{{ icon }}.svg" width="19" height="19" alt="">{{ label }}

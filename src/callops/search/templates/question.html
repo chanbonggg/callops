@@ -1,0 +1,58 @@
+{% extends "layout.html" %}
+{% block title %}통화에 질문하기{% endblock %}
+{% block content %}
+<div>
+  <h1>통화에 질문하기</h1>
+  <p class="hint">거래처나 날짜가 기억나는 만큼만 질문하세요.</p>
+  <a class="hint" href="/search">전사 키워드 검색 →</a>
+</div>
+<form class="card" method="post" action="/questions">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label for="question">질문</label>
+  <input id="question" name="q" required maxlength="{{ query_limit }}" value="{{ fields.q }}"
+         placeholder="A 거래처랑 미팅이 언제였지?"{% if error %} aria-describedby="form-error"{% endif %}>
+  {% if error %}<p id="form-error" role="alert" class="error">{{ error }}</p>{% endif %}
+  <details{% if fields.counterparty or fields.from_date or fields.to_date %} open{% endif %}>
+    <summary class="hint">검색 범위 좁히기 (선택)</summary>
+    <div class="fields">
+      <label>거래처 <input name="counterparty" maxlength="100" value="{{ fields.counterparty }}"></label>
+      <div class="actions">
+        <label>시작일 <input type="date" name="from_date" value="{{ fields.from_date }}"></label>
+        <label>종료일 <input type="date" name="to_date" value="{{ fields.to_date }}"></label>
+      </div>
+      <p class="hint">날짜는 한국 시간 기준입니다.</p>
+    </div>
+  </details>
+  <button class="primary">질문하기</button>
+</form>
+{% if limited %}<p class="notice">일부 최근 통화만 확인했습니다.</p>{% endif %}
+{% if unavailable %}<p class="notice">일부 전사를 확인할 수 없습니다.</p>{% endif %}
+{% if state %}
+<section class="card" aria-labelledby="question-result">
+  {% if state == 'missing' %}
+  <h2 id="question-result">답변할 근거를 찾지 못했어요</h2>
+  <p>거래처, 미팅 주제처럼 기억나는 단서를 넣어 다시 질문해 보세요.</p>
+  {% elif state == 'clarify' %}
+  <h2 id="question-result">어느 미팅을 말씀하시나요?</h2>
+  <p>아래 발화에서 기억나는 미팅 주제나 약속을 질문에 덧붙여 주세요.</p>
+  {% elif state == 'uncertain' %}
+  <h2 id="question-result">미팅 시점을 확정하기 어려워요</h2>
+  <p>아래 발화에서 약속이 확정됐는지 확인해 주세요.</p>
+  {% else %}
+  <h2 id="question-result">답변</h2>
+  <p>관련 통화에서 아래 발화를 찾았어요.</p>
+  {% endif %}
+  {% for match, segment, uncertain in sources %}
+  <p class="hint">[{{ loop.index }}] {{ match.counterparty or '거래처 미확인' }}
+    {% if match.call_started_at %} · {{ match.call_started_at.astimezone(call_timezone).strftime('%Y.%m.%d %H:%M') }}{% endif %}</p>
+  <p>“{{ segment.text }}”</p>
+  <div class="actions">
+    <a class="button secondary" href="{{ segment.source_url }}">전사 열기</a>
+    {% if segment.audio_url %}
+    <a class="button secondary" href="{{ segment.audio_url }}">원음 재생 · {{ '%02d:%02d'|format((segment.start|int) // 60, (segment.start|int) % 60) }}</a>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}

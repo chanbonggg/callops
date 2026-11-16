@@ -138,6 +138,50 @@ class TranscriptViewTests(ProductCase):
         self.assertIn('수요일 방문 확정', page.text)
         self.assertEqual(self.http('GET', source + '/audio/3').status_code, 200)
 
+    def test_question_without_filter_and_with_ambiguous_or_expired_evidence(self):
+        fields = {'q': '내가 A 거래처랑 미팅이 언제였지?'}
+        self.assertEqual(self.http('GET', '/questions').status_code, 401)
+        self.assertEqual(self.http('POST', '/questions', data=fields).status_code, 401)
+        csrf = self.login()
+        self.assertIn('<details>', self.http('GET', '/questions').text)
+        self.assertEqual(self.http('POST', '/questions', data=fields).status_code, 403)
+
+        def ask(**overrides):
+            return self.http('POST', '/questions', data={**fields, 'csrf': csrf, **overrides})
+
+        self.assertIn('답변할 근거를 찾지 못했어요', ask().text)
+        self.assertEqual(ask(q='   ').status_code, 400)
+        self.assertEqual(ask(q='가' * 201).status_code, 400)
+        self.assertEqual(ask(from_date='2030-01-01', to_date='2029-12-31').status_code, 400)
+        recording, artifact = self.save_search_transcript(
+            '가상 A 거래처', '2029-12-31T23:59', '견적 미팅은 1월 2일 오후 2시입니다. <script>가상</script>')
+        self.save_search_transcript('가상 B 거래처', '2029-12-31T23:59', '다른 회사 미팅은 1월 3일입니다.')
+        source = f'/recordings/{recording}/transcripts/{artifact}'
+        response = ask()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('1월 2일 오후 2시', response.text)
+        self.assertNotIn('다른 회사', response.text)
+        self.assertNotIn('<script>가상</script>', response.text)
+        self.assertIn(source + '#segment-1', response.text)
+        self.assertEqual(self.http('GET', source + '/audio/1').status_code, 200)
+        self.assertIn(source + '/audio/1', response.text)
+
+        other, _ = self.save_search_transcript(
+            '가상 A 거래처', '2030-01-01T00:00', '납품 미팅은 1월 4일이지만 취소됐습니다.')
+        self.assertIn('어느 미팅을 말씀하시나요?', ask().text)
+        self.assertIn('미팅 시점을 확정하기 어려워요', ask(from_date='2030-01-01').text)
+        self.assertNotIn('납품 미팅은', ask(q='A 거래처랑 견적 미팅이 언제였지?').text)
+        self.assertNotIn('납품 미팅은', ask(to_date='2029-12-31').text)
+        self.service.classify(other, 'PRIVATE_EXCLUDED')
+        self.assertNotIn('납품 미팅은', ask().text)
+        self.advance(days=31)
+        csrf = self.login()
+        self.assertIn(source + '#segment-1', ask().text)
+        self.assertNotIn(source + '/audio/1', ask().text)
+        self.advance(days=60)
+        csrf = self.login()
+        self.assertIn('답변할 근거를 찾지 못했어요', ask().text)
+
     def test_rag_rechecks_evidence_removed_while_embeddings_run(self):
         started_at = '2029-12-31T23:59'
         self.save_search_transcript('가상 거래처', started_at, '곧 만료될 전사')
