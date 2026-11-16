@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from callops.processing.fake_worker import FakeWorker
 from callops.common import digest
+from callops.search.retrieval import retrieve_evidence
 from tests.support import ProductCase
 
 
@@ -92,6 +93,75 @@ class TranscriptViewTests(ProductCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn('견적서 발송 합의', response.text)
         self.assertIn('일치하는 전사 구간이 없습니다', response.text)
+
+    def test_rag_filters_before_embedding_and_cites_original_segments(self):
+        self.save_search_transcript('가상 A 거래처', '2030-01-01T00:00', '기간 밖 통화')
+        self.save_search_transcript('가상 B 거래처', '2029-12-31T23:59', '거래처 밖 통화')
+        recording = self.ingest()
+        self.service.update_metadata(recording, '가상 A 거래처', '2029-12-31T23:59')
+        segments = [
+            {'segment_id': 1, 'start': 0, 'end': 0.25, 'text': '초기 제안 ' + '가' * 220},
+            {'segment_id': 2, 'start': 0.25, 'end': 0.5, 'text': '날짜 변경 ' + '나' * 220},
+            {'segment_id': 3, 'start': 0.5, 'end': 1, 'text': '수요일 방문 확정 ' + '다' * 220},
+        ]
+        _, job, data, report = self.prepare_transcript(recording=recording, segments=segments)
+        uploaded = self.upload(job, data, report)
+        self.assertEqual(uploaded.status_code, 200)
+        artifact = uploaded.json()['artifact_id']
+        query = '방문 날짜가 언제죠?'
+        seen = []
+
+        def embed(text):
+            seen.append(text)
+            if text == query or '수요일 방문 확정' in text:
+                return (1, 0)
+            return (1, 1)
+
+        matches, limited, unavailable = retrieve_evidence(
+            self.service, query, embed=embed, counterparty='가상 A',
+            from_date='2029-12-31', to_date='2029-12-31')
+        self.assertFalse(limited or unavailable)
+        self.assertEqual(len(seen), 3)
+        self.assertTrue(all('밖 통화' not in text for text in seen))
+        self.assertEqual([[segment['segment_id'] for segment in match['segments']] for match in matches],
+                         [[2, 3], [1, 2]])
+        first = matches[0]
+        self.assertEqual((str(first['recording_id']), str(first['artifact_id']), first['start'], first['end']),
+                         (recording, artifact, 0.25, 1))
+        source = f'/recordings/{recording}/transcripts/{artifact}'
+        self.assertEqual(first['segments'][1]['source_url'], source + '#segment-3')
+        self.assertEqual(self.http('GET', source).status_code, 401)
+        self.login()
+        page = self.http('GET', source)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="segment-3"', page.text)
+        self.assertIn('수요일 방문 확정', page.text)
+        self.assertEqual(self.http('GET', source + '/audio/3').status_code, 200)
+
+    def test_rag_rechecks_evidence_removed_while_embeddings_run(self):
+        started_at = '2029-12-31T23:59'
+        self.save_search_transcript('가상 거래처', started_at, '곧 만료될 전사')
+        self.advance(hours=1)
+        deleted, _ = self.save_search_transcript('가상 거래처', started_at, '삭제 요청될 전사')
+        private, _ = self.save_search_transcript('가상 거래처', started_at, '사적 전사')
+        kept, _ = self.save_search_transcript('가상 거래처', started_at, '유지할 전사')
+        self.service.classify(private, 'PRIVATE_EXCLUDED')
+        self.advance(days=89, hours=22, minutes=59)
+        seen = []
+
+        def embed(text):
+            seen.append(text)
+            if text == '삭제 요청될 전사':
+                with self.service.transaction() as conn:
+                    self.service.request_delete(conn, deleted)
+                self.advance(minutes=2)
+            return (1, 0)
+
+        matches, _, _ = retrieve_evidence(self.service, '확인할 내용', embed=embed)
+        self.assertIn('곧 만료될 전사', seen)
+        self.assertIn('삭제 요청될 전사', seen)
+        self.assertNotIn('사적 전사', seen)
+        self.assertEqual([str(match['recording_id']) for match in matches], [kept])
 
     def test_structured_transcript_round_trip_ack_and_immutable_source_links(self):
         recording, job, data, report = self.prepare_transcript()

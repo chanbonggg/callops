@@ -3,6 +3,8 @@ import json
 import subprocess
 import tempfile
 import unittest
+from collections import Counter
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -74,12 +76,26 @@ class HarnessTests(unittest.TestCase):
         private = next(case for case in cases if case["id"] == "T04")
         self.assertEqual(private["expected"]["ai_calls"], 0)
 
-    def test_rag_development_fixture_has_valid_scoped_evidence(self):
-        from collections import Counter
+    def test_rag_fixtures_have_valid_scoped_evidence(self):
+        seen_ids = set()
+        seen_texts = set()
+        for split in ('development', 'final'):
+            with self.subTest(split=split):
+                data = json.loads((ROOT / f"tests/fixtures/rag-{split}.json").read_text(encoding="utf-8"))
+                self.assertEqual(data['split'], split)
+                self.check_rag_fixture(data)
+                segments = [s for call in data['calls'] for s in call['segments']]
+                ids = {row['id'] for row in data['calls'] + data['questions'] + segments}
+                texts = {row['text'].strip() for row in data['questions'] + segments}
+                self.assertTrue(seen_ids.isdisjoint(ids))
+                self.assertTrue(seen_texts.isdisjoint(texts))
+                seen_ids.update(ids)
+                seen_texts.update(texts)
 
-        data = json.loads((ROOT / "tests/fixtures/rag-development.json").read_text(encoding="utf-8"))
-        self.assertTrue(data['synthetic'])
-        self.assertEqual(data['split'], 'development')
+    def check_rag_fixture(self, data):
+        self.assertIs(data['synthetic'], True)
+        self.assertEqual(data['schema_version'], 1)
+        self.assertEqual(data['timezone'], 'Asia/Seoul')
         self.assertEqual(len(data['calls']), 10)
         self.assertEqual(len(data['questions']), 20)
         self.assertEqual(len({call['id'] for call in data['calls']}), 10)
@@ -87,13 +103,38 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(Counter(q['category'] for q in data['questions']),
                          {'명확한 합의': 7, '상대·기간 필터': 4, '정정·취소': 4,
                           '여러 통화 결합': 2, '근거 부족·모호함': 3})
-        segments = {s['id']: call for call in data['calls'] for s in call['segments']}
+        korea = timezone(timedelta(hours=9))
+        segments = {}
+        for call in data['calls']:
+            started_at = datetime.fromisoformat(call['call_started_at'])
+            self.assertIsNotNone(started_at.utcoffset())
+            call_date = started_at.astimezone(korea).date()
+            previous_end = 0
+            self.assertTrue(call['segments'])
+            for segment in call['segments']:
+                self.assertTrue(segment['text'].strip())
+                self.assertLessEqual(previous_end, segment['start'])
+                self.assertLess(segment['start'], segment['end'])
+                previous_end = segment['end']
+                segments[segment['id']] = (call, call_date)
         self.assertEqual(len(segments), sum(len(call['segments']) for call in data['calls']))
         for question in data['questions']:
             self.assertEqual(bool(question['expected_facts']), question['answerable'])
             self.assertEqual(bool(question['abstention_reason']), not question['answerable'])
-            for segment_id in question['required_evidence_ids']:
-                call = segments[segment_id]
-                self.assertEqual(call['counterparty'], question['filters']['counterparty'])
-                self.assertLessEqual(question['filters']['from_date'], call['call_started_at'][:10])
-                self.assertLessEqual(call['call_started_at'][:10], question['filters']['to_date'])
+            evidence = question['required_evidence_ids']
+            self.assertEqual(len(evidence), len(set(evidence)))
+            if question['answerable']:
+                self.assertTrue(evidence)
+            filters = question['filters']
+            from_date = date.fromisoformat(filters['from_date'])
+            to_date = date.fromisoformat(filters['to_date'])
+            self.assertLessEqual(from_date, to_date)
+            cited_calls = set()
+            for segment_id in evidence:
+                call, call_date = segments[segment_id]
+                self.assertEqual(call['counterparty'], filters['counterparty'])
+                self.assertLessEqual(from_date, call_date)
+                self.assertLessEqual(call_date, to_date)
+                cited_calls.add(call['id'])
+            if question['category'] == '여러 통화 결합':
+                self.assertGreaterEqual(len(cited_calls), 2)

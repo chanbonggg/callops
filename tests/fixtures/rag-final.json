@@ -1,0 +1,658 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "split": "final",
+  "timezone": "Asia/Seoul",
+  "notes": [
+    "모든 이름과 대화는 가상이다. 음성 파일과 실제 사용자 정보는 포함하지 않는다.",
+    "모델·프롬프트·검색 설정을 고정한 뒤 최종 평가에만 쓴다. 결과를 보고 튜닝하지 않는다.",
+    "통화 시각 필터는 실제 통화 시작 시각의 한국 날짜를 기준으로 한다.",
+    "expected_facts는 의미를 대조하는 채점 기준이다. 출력 문장의 문자 일치는 요구하지 않는다.",
+    "required_evidence_ids는 calls 안의 구간을 가리킨다. 인용 시간은 해당 구간의 start와 end를 사용한다.",
+    "이 세트는 실제 음성의 전사 정확도나 현재 Calendar 상태를 측정하지 않는다."
+  ],
+  "calls": [
+    {
+      "id": "FINAL-C01",
+      "counterparty": "가상모래결조명",
+      "call_started_at": "2031-04-02T09:10:00+09:00",
+      "segments": [
+        {
+          "id": "FINAL-C01-S01",
+          "start": 0,
+          "end": 7,
+          "speaker": "상대",
+          "text": "조명 제어기 40상자는 4월 9일 오전 10시부터 11시 사이에 북쪽 하역문으로 반입해 주세요."
+        },
+        {
+          "id": "FINAL-C01-S02",
+          "start": 7,
+          "end": 13,
+          "speaker": "사용자",
+          "text": "그 시간에 들어가겠습니다. 상자마다 품목 바코드를 바깥쪽에 한 장씩 붙이겠습니다."
+        }
+      ]
+    },
+    {
+      "id": "FINAL-C02",
+      "counterparty": "가상모래결조명",
+      "call_started_at": "2031-04-04T08:20:00+09:00",
+      "segments": [
+        {
+          "id": "FINAL-C02-S01",
+          "start": 0,
+          "end": 7,
+          "speaker": "상대",
+          "text": "4월 9일 조명 제어기 40상자 반입 건으로 연락드렸어요. 오전에는 하역 통로가 막힐 예정입니다."
+        },
+        {
+          "id": "FINAL-C02-S02",
+          "start": 7,
+          "end": 13,
+          "speaker": "상대",
+          "text": "같은 날 오후 3시에서 4시 사이로 옮기고, 출입구는 동쪽 하역문으로 바꿔 주세요."
+        },
+        {
+          "id": "FINAL-C02-S03",
+          "start": 13,
+          "end": 20,
+          "speaker": "사용자",
+          "text": "네, 4월 9일 오후 3시부터 4시 사이에 동쪽 하역문으로 가겠습니다. 바코드 부착은 그대로 진행할게요."
+        }
+      ]
+    },
+    {
+      "id": "FINAL-C03",
+      "counterparty": "가상모래결조명",
+      "call_started_at": "2031-04-05T13:40:00+09:00",
+      "segments": [
+        {
+          "id": "FINAL-C03-S01",
+          "start": 0,
+          "end": 6,
+          "speaker": "사용자",
+          "text": "조명 제어기 거래명세서의 수신인이 구매팀으로 되어 있는데, 창고운영팀 앞으로 정정하겠습니다."
+        },
+        {
+          "id": "FINAL-C03-S02",
+          "start": 6,
+          "end": 11,
+          "speaker": "상대",
+          "text": "수신인은 창고운영팀이 맞아요. 정정본은 4월 6일 정오까지 보내 주세요."
+        },
+        {
+          "id": "FINAL-C03-S03",
+          "start": 11,
+          "end": 15,
+          "speaker": "사용자",
+          "text": "네, 제가 4월 6일 낮 12시까지 정정본을 보내겠습니다."
+        }
+      ]
+    },
+    {
+      "id": "FINAL-C04",
+      "counterparty": "가상모래결가구",
+      "call_started_at": "2031-04-04T10:00:00+09:00",
+      "segments": [
+        {
+          "id": "FINAL-C04-S01",
+          "start": 0,
+          "end": 5,
+          "speaker": "상대",
+          "text": "가구 마감판 견본은 4월 9일 오후 2시에 북쪽 하역문으로 가져다 주세요."
+        },
+        {
+          "id": "FINAL-C04-S02",
+          "start": 5,
+          "end": 9,
+          "speaker": "사용자",
+          "text": "네, 가구 마감판 견본은 4월 9일 오후 2시에 가져가겠습니다."
+        },
+        {
+          "id": "FINAL-C04-S03",
+          "start": 9,
+          "end": 15,
+          "speaker": "상대",
+          "text": "북쪽 하역문 맞습니다. 방명록에는 방문 목적을 마감판 견본 제출이라고 적어 주세요."
+        }
+      ]
+    },
+    {
+      "id": "FINAL-C05",
+      "counterparty": "가상별이음전시",
+      "call_started_at": "2031-04-06T17:00:00+09:00",
+      "segments": [
+        {
+          "id": "FINAL-C05-S01",
+          "start": 0,
+          "end": 6,
+          "speaker": "사용자",
+          "text": "기존에 4월 10일 저녁 7시 조명 리허설을 하기로 했죠? 장비를 미리 들여놓으려고요."
+        },
+        {
+          "id": "FINAL-C05-S02",
+          "start": 6,
+          "end": 12,
+          "speaker": "상대",
+          "text": "4월 10일 조명 리허설은 아예 취소됐습니다. 새 리허설을 잡기로도 결정하지 않았어요."
+        },
+        {
+          "id": "FINAL-C05-S03",
+          "start": 12,
+          "end": 16,
+          "speaker": "사용자",
+          "text": "알겠습니다. 리허설 장비 반입도 진행하지 않겠습니다."
+        }
+      ]
+    },
+    {
+      "id": "FINAL-C06",
+      "counterparty": "가상별이음전시",
+      "call_started_at": "2031-04-07T11:10:00+09:00",
+      "segments": [
+        {
+          "id": "FINAL-C06-S01",
+          "start": 0,
+          "end": 7,
+          "speaker": "상대",
+          "text": "리허설과 별개로 본 전시 준비 회의는 4월 12일 오후 1시에 전시장 2층 소회의실에서 합니다."
+        },
+        {
+          "id": "FINAL-C06-S02",
+          "start": 7,
+          "end": 13,
+          "speaker": "사용자",
+          "text": "그 회의에 참석하겠습니다. 4월 12일 오후 1시, 2층 소회의실로 가면 되는군요."
+        },
+        {
+          "id": "FINAL-C06-S03",
+          "start": 13,
+          "end": 18,
+          "speaker": "상대",
+          "text": "네. 출입증을 받으려면 참석자 명단을 4월 11일 오후 5시까지 보내 주세요."
+        },
+        {
+          "id": "FINAL-C06-S04",
+          "start": 18,
+          "end": 22,
+          "speaker": "사용자",
+          "text": "명단은 제가 기한 안에 전시 운영팀으로 보내겠습니다."
+        }
+      ]
+    },
+    {
+      "id": "FINAL-C07",
+      "counterparty": "가상여울빛인쇄",
+      "call_started_at": "2031-04-07T23:55:00+09:00",
+      "segments": [
+        {
+          "id": "FINAL-C07-S01",
+          "start": 0,
+          "end": 4,
+          "speaker": "상대",
+          "text": "안내 책자는 남색 표지에 초도 250부로 제작하면 될까요?"
+        },
+        {
+          "id": "FINAL-C07-S02",
+          "start": 4,
+          "end": 10,
+          "speaker": "사용자",
+          "text": "네, 남색 표지로 250부 제작을 요청합니다. 표지 뒷면은 무광으로 마감해 주세요."
+        }
+      ]
+    },
+    {
+      "id": "FINAL-C08",
+      "counterparty": "가상여울빛인쇄",
+      "call_started_at": "2031-04-08T00:15:00+09:00",
+      "segments": [
+        {
+          "id": "FINAL-C08-S01",
+          "start": 0,
+          "end": 6,
+          "speaker": "사용자",
+          "text": "조금 전 주문한 남색 책자 250부를 300부로 늘려 주세요. 뒷면 무광은 그대로입니다."
+        },
+        {
+          "id": "FINAL-C08-S02",
+          "start": 6,
+          "end": 12,
+          "speaker": "상대",
+          "text": "수량을 300부로 정정했습니다. 표지는 남색이고 뒷면 무광 마감 그대로 제작하겠습니다."
+        }
+      ]
+    },
+    {
+      "id": "FINAL-C09",
+      "counterparty": "가상돌구름설비",
+      "call_started_at": "2031-04-08T14:20:00+09:00",
+      "segments": [
+        {
+          "id": "FINAL-C09-S01",
+          "start": 0,
+          "end": 5,
+          "speaker": "사용자",
+          "text": "지난번 설치 사진에는 가압 시험을 2바로 진행하라고 메모했더라고요."
+        },
+        {
+          "id": "FINAL-C09-S02",
+          "start": 5,
+          "end": 9,
+          "speaker": "상대",
+          "text": "제가 받은 작업표에는 같은 시험이 3바로 되어 있습니다."
+        },
+        {
+          "id": "FINAL-C09-S03",
+          "start": 9,
+          "end": 16,
+          "speaker": "상대",
+          "text": "두 기록 중 어떤 쪽이 승인본인지 아직 모릅니다. 승인본을 다시 확인한 뒤 시험 조건을 정하겠습니다."
+        }
+      ]
+    },
+    {
+      "id": "FINAL-C10",
+      "counterparty": "가상푸른결포장",
+      "call_started_at": "2031-04-09T15:20:00+09:00",
+      "segments": [
+        {
+          "id": "FINAL-C10-S01",
+          "start": 0,
+          "end": 4,
+          "speaker": "상대",
+          "text": "완충재는 6밀리미터 두께 샘플을 4월 15일까지 전달하겠습니다."
+        },
+        {
+          "id": "FINAL-C10-S02",
+          "start": 4,
+          "end": 9,
+          "speaker": "사용자",
+          "text": "샘플은 먼저 받아 볼게요. 결제 조건은 월말 지급으로 합의하겠습니다."
+        },
+        {
+          "id": "FINAL-C10-S03",
+          "start": 9,
+          "end": 16,
+          "speaker": "상대",
+          "text": "월말 지급으로 확인했습니다. 단가는 샘플 승인 뒤 제시하고 오늘은 금액을 확정하지 않겠습니다."
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "FINAL-Q01",
+      "category": "명확한 합의",
+      "text": "조명 제어기 상자 바깥쪽에 어떤 표식을 몇 장씩 붙이기로 했나?",
+      "filters": {
+        "counterparty": "가상모래결조명",
+        "from_date": "2031-04-02",
+        "to_date": "2031-04-02"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "상자마다 바깥쪽에 품목 바코드 한 장 부착"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C01-S02"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q02",
+      "category": "명확한 합의",
+      "text": "조명 제어기 반입 수량은 몇 상자인가?",
+      "filters": {
+        "counterparty": "가상모래결조명",
+        "from_date": "2031-04-04",
+        "to_date": "2031-04-04"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "40상자"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C02-S01"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q03",
+      "category": "명확한 합의",
+      "text": "정정된 거래명세서는 어느 팀 앞으로 보내나?",
+      "filters": {
+        "counterparty": "가상모래결조명",
+        "from_date": "2031-04-05",
+        "to_date": "2031-04-05"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "창고운영팀 앞으로 발송"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C03-S01"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q04",
+      "category": "명확한 합의",
+      "text": "마감판 견본을 제출하러 가면 방명록에 방문 목적을 뭐라고 쓰나?",
+      "filters": {
+        "counterparty": "가상모래결가구",
+        "from_date": "2031-04-04",
+        "to_date": "2031-04-04"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "마감판 견본 제출"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C04-S03"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q05",
+      "category": "명확한 합의",
+      "text": "본 전시 준비 회의 장소와 시작 시각은?",
+      "filters": {
+        "counterparty": "가상별이음전시",
+        "from_date": "2031-04-07",
+        "to_date": "2031-04-07"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "2031년 4월 12일 13시",
+        "전시장 2층 소회의실"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C06-S01",
+        "FINAL-C06-S02"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q06",
+      "category": "명확한 합의",
+      "text": "초도 안내 책자 표지 뒷면 마감은 무엇으로 합의했나?",
+      "filters": {
+        "counterparty": "가상여울빛인쇄",
+        "from_date": "2031-04-07",
+        "to_date": "2031-04-07"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "무광 마감"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C07-S02"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q07",
+      "category": "명확한 합의",
+      "text": "완충재 대금은 언제 지급하기로 합의했나?",
+      "filters": {
+        "counterparty": "가상푸른결포장",
+        "from_date": "2031-04-09",
+        "to_date": "2031-04-09"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "월말 지급"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C10-S02",
+        "FINAL-C10-S03"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q08",
+      "category": "상대·기간 필터",
+      "text": "4월 4일 모래결조명 통화에서 반입 시각과 입구를 어디로 확정했나?",
+      "filters": {
+        "counterparty": "가상모래결조명",
+        "from_date": "2031-04-04",
+        "to_date": "2031-04-04"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "2031년 4월 9일 15~16시 사이",
+        "동쪽 하역문"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C02-S03"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q09",
+      "category": "상대·기간 필터",
+      "text": "4월 4일 모래결가구 통화에서 견본 반입 시간과 출입구는?",
+      "filters": {
+        "counterparty": "가상모래결가구",
+        "from_date": "2031-04-04",
+        "to_date": "2031-04-04"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "2031년 4월 9일 14시",
+        "북쪽 하역문"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C04-S01",
+        "FINAL-C04-S02"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q10",
+      "category": "상대·기간 필터",
+      "text": "4월 7일 밤에 여울빛인쇄와 합의한 책자의 초도 제작 수량은?",
+      "filters": {
+        "counterparty": "가상여울빛인쇄",
+        "from_date": "2031-04-07",
+        "to_date": "2031-04-07"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "250부"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C07-S02"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q11",
+      "category": "상대·기간 필터",
+      "text": "4월 8일 자정 이후 여울빛인쇄 통화에서 확정한 제작 수량은?",
+      "filters": {
+        "counterparty": "가상여울빛인쇄",
+        "from_date": "2031-04-08",
+        "to_date": "2031-04-08"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "300부"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C08-S02"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q12",
+      "category": "정정·취소",
+      "text": "제어기 반입 약속의 시간과 하역문이 처음과 비교해 어떻게 바뀌었나?",
+      "filters": {
+        "counterparty": "가상모래결조명",
+        "from_date": "2031-04-02",
+        "to_date": "2031-04-04"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "4월 9일 10~11시 북쪽 하역문으로 처음 합의",
+        "동일 날짜 15~16시 동쪽 하역문으로 변경"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C01-S01",
+        "FINAL-C01-S02",
+        "FINAL-C02-S03"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q13",
+      "category": "정정·취소",
+      "text": "4월 10일 조명 리허설과 그에 따른 장비 반입은 어떻게 처리하기로 했나?",
+      "filters": {
+        "counterparty": "가상별이음전시",
+        "from_date": "2031-04-06",
+        "to_date": "2031-04-06"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "4월 10일 조명 리허설 취소",
+        "대체 리허설 미정",
+        "리허설 장비 반입도 중단"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C05-S02",
+        "FINAL-C05-S03"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q14",
+      "category": "정정·취소",
+      "text": "조명 제어기 거래명세서 수신인을 어디에서 어디로 정정했나?",
+      "filters": {
+        "counterparty": "가상모래결조명",
+        "from_date": "2031-04-05",
+        "to_date": "2031-04-05"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "구매팀에서 창고운영팀으로 정정"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C03-S01"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q15",
+      "category": "정정·취소",
+      "text": "안내 책자 주문에서 바뀐 것과 유지된 것은 무엇인가?",
+      "filters": {
+        "counterparty": "가상여울빛인쇄",
+        "from_date": "2031-04-07",
+        "to_date": "2031-04-08"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "제작 수량 250부에서 300부로 변경",
+        "남색 표지와 뒷면 무광은 유지"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C07-S01",
+        "FINAL-C07-S02",
+        "FINAL-C08-S02"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q16",
+      "category": "여러 통화 결합",
+      "text": "조명 제어기 반입 전 거래명세서 정정본을 보내는 때와 제어기를 들여오는 때를 각각 알려 줘.",
+      "filters": {
+        "counterparty": "가상모래결조명",
+        "from_date": "2031-04-04",
+        "to_date": "2031-04-05"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "정정본은 사용자가 4월 6일 12시까지 전송",
+        "반입은 4월 9일 15~16시 사이"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C02-S03",
+        "FINAL-C03-S03"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q17",
+      "category": "여러 통화 결합",
+      "text": "전시 준비 중 취소된 일정과 여전히 참석하기로 한 일정은 각각 무엇인가?",
+      "filters": {
+        "counterparty": "가상별이음전시",
+        "from_date": "2031-04-06",
+        "to_date": "2031-04-07"
+      },
+      "answerable": true,
+      "expected_facts": [
+        "4월 10일 조명 리허설 취소",
+        "4월 12일 13시 전시장 2층 소회의실의 본 전시 준비 회의 참석"
+      ],
+      "required_evidence_ids": [
+        "FINAL-C05-S02",
+        "FINAL-C06-S01",
+        "FINAL-C06-S02"
+      ],
+      "abstention_reason": null
+    },
+    {
+      "id": "FINAL-Q18",
+      "category": "근거 부족·모호함",
+      "text": "모래결조명에 입금할 계좌번호는 무엇인가?",
+      "filters": {
+        "counterparty": "가상모래결조명",
+        "from_date": "2031-04-05",
+        "to_date": "2031-04-05"
+      },
+      "answerable": false,
+      "expected_facts": [],
+      "required_evidence_ids": [],
+      "abstention_reason": "이 범위의 통화에는 거래명세서 정정만 나오며 결제 계좌를 알 수 없다."
+    },
+    {
+      "id": "FINAL-Q19",
+      "category": "근거 부족·모호함",
+      "text": "설비 가압 시험을 몇 바에서 하기로 확정했나?",
+      "filters": {
+        "counterparty": "가상돌구름설비",
+        "from_date": "2031-04-08",
+        "to_date": "2031-04-08"
+      },
+      "answerable": false,
+      "expected_facts": [],
+      "required_evidence_ids": [
+        "FINAL-C09-S01",
+        "FINAL-C09-S02",
+        "FINAL-C09-S03"
+      ],
+      "abstention_reason": "2바와 3바라는 기록이 상충하고 승인본을 확인하기 전에는 시험 조건을 확정할 수 없다."
+    },
+    {
+      "id": "FINAL-Q20",
+      "category": "근거 부족·모호함",
+      "text": "완충재 거래에 합의한 단가는 얼마인가?",
+      "filters": {
+        "counterparty": "가상푸른결포장",
+        "from_date": "2031-04-09",
+        "to_date": "2031-04-09"
+      },
+      "answerable": false,
+      "expected_facts": [],
+      "required_evidence_ids": [
+        "FINAL-C10-S03"
+      ],
+      "abstention_reason": "샘플 승인 후 단가를 제시할 예정이므로 통화에서는 금액이 확정되지 않았다."
+    }
+  ]
+}

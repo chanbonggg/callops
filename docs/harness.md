@@ -29,6 +29,7 @@ python scripts/check.py --phase P3
 | `tests/harness/` | 검사 도구 자체의 회귀 테스트 |
 | `tests/fixtures/scenarios.json` | T01~T10 및 중복 사례의 합성 대본·기대 결과 |
 | `tests/fixtures/rag-development.json` | 개발용 가상 통화 10건·질문 20개와 실제 전사 구간 ID를 참조하는 정답 근거 |
+| `tests/fixtures/rag-final.json` | 최종 평가용 가상 통화 10건·질문 20개. 하네스가 개발 세트와의 중복, 근거 구간과 질문 범위를 검사한다. |
 | `tests/p1/` | 설정·실제 DB·마이그레이션·권한 경계 검사 |
 | `scripts/test_postgres.py` | 기존 서비스와 분리된 새 PostgreSQL에서 지정 단계 실행·정리 |
 | `tests/p2/`, `tests/p3/` | 수집·인증·분류·삭제 및 실제 큐/API 회귀 검사 |
