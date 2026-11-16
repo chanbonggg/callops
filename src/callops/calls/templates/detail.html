@@ -9,7 +9,7 @@
 {% if row.call_started_at %}{{ row.call_started_at.astimezone(call_timezone).strftime('%Y-%m-%d %H:%M:%S') }}
 {% else %}미확인{% endif %}</p>
 {% if audio_available %}
-<audio controls preload="none" src="/recordings/{{ row.id }}/audio"></audio>
+{% include 'audio.html' %}
 {% else %}<p>원음을 재생할 수 없습니다.</p>{% endif %}
 {% if result %}
 <h2>합성 전사</h2><p>서버 기능 검증용 가상 결과입니다.</p>
@@ -20,8 +20,8 @@
 <h3>구간 {{ segment.segment_id }} · {{ segment.start }} ~ {{ segment.end }}초</h3>
 <p>{{ segment.text }}</p>
 <a href="/recordings/{{ row.id }}/transcripts/{{ artifact.id }}#segment-{{ segment.segment_id }}">이 근거 링크</a>
-{% if audio_available %}
- · <a href="/recordings/{{ row.id }}/audio#t={{ segment.start }},{{ segment.end }}">해당 원음 구간 열기</a>
+{% if audio_available and segment.start < segment.end %}
+ · <a href="/recordings/{{ row.id }}/transcripts/{{ artifact.id }}/audio/{{ segment.segment_id }}">해당 원음 구간 열기</a>
 {% endif %}</article>
 {% else %}<p>전사 구간이 없는 합성 결과입니다.</p>{% endfor %}
 {% else %}<p>시간 구간이 없는 합성 결과</p><p>{{ result.text }}</p>{% endif %}

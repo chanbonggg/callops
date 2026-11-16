@@ -11,6 +11,7 @@ PostgreSQL의 `jobs`와 `attempts`로 서버 작업 큐를 운영한다. `queue.
 - 실행 시도에는 작업의 통화 ID를 함께 저장한다. 복합 외래 키가 작업·입력·결과의 통화 범위와 활성 시도의 작업 소속을 검증한다. [큐 무결성 제약](../../../migrations/008_processing_integrity.sql)
 - 결과는 `.part` 기록·fsync·rename 후 artifact, 다음 작업 또는 일정 후보와 함께 DB에 반영한다. 성공 직전에 기한을 재검사한다. DB 커밋 여부가 불확실한 파일은 통화 모듈의 `recover()`에서 정리한다.
 - 서버 수락 형식은 `synthetic: true`다. v1 텍스트는 기존 결과 호환에 쓰고, v2 STT는 시간 구간, v2 ANALYSIS는 고정 전사에 근거한 일정 후보를 사용한다. [결과 스키마](transcript.py) · [후보 모듈](../schedule/AGENTS.md)
+- 가짜 STT 워커는 다운받은 원음의 해시를 확인하고 [수신 오디오 검증](../calls/audio.py)의 디코딩 길이로 합성 구간을 만든다.
 
 ## 변경 시 확인
 

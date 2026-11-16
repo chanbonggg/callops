@@ -8,9 +8,9 @@ This synchronous worker is for short synthetic jobs, not a GPU process runner.
 import io
 import json
 import os
-import wave
 from uuid import uuid4
 
+from ..calls.audio import audio_duration
 from ..common import digest, identifier
 
 
@@ -57,8 +57,7 @@ class FakeWorker:
         result = {name: job[name] for name in ('job_id', 'input_sha256', 'input_artifact_id', 'input_artifact_version')}
         result.update(attempt_id=job['copy_key'], schema_version=1, synthetic=True)
         if job['stage'] == 'STT':
-            with wave.open(io.BytesIO(data), 'rb') as audio:
-                duration = audio.getnframes() / audio.getframerate()
+            duration = audio_duration(io.BytesIO(data))
             result.update(schema_version=2, segments=[{'segment_id': 1, 'start': 0, 'end': duration,
                                                        'text': transcript_text}])
         elif events is not None:

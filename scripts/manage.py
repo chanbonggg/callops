@@ -49,7 +49,15 @@ def main():
                 service.recover()
                 Queue(service).reap()
                 print('Maintenance completed; offline worker copies may still require confirmation')
-    except (ConfigurationError, DatabaseError, Conflict, OSError, psycopg.Error):
+    except Conflict as error:
+        if args.command == 'ingest' and str(error) in {
+            'INVALID_PATH', 'INVALID_HASH', 'INVALID_AUDIO', 'UNSUPPORTED_AUDIO_FORMAT', 'TRANSFER_INCOMPLETE',
+        }:
+            print(f'FAIL: {error}', file=sys.stderr)
+        else:
+            print("FAIL: configuration/database unavailable; values withheld", file=sys.stderr)
+        return 1
+    except (ConfigurationError, DatabaseError, OSError, psycopg.Error):
         print("FAIL: configuration/database unavailable; values withheld", file=sys.stderr)
         return 1
     return 0

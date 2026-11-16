@@ -5,7 +5,6 @@ import json
 import os
 import re
 import stat
-import wave
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import uuid4
@@ -15,6 +14,7 @@ from psycopg.rows import dict_row
 
 from ..common import Conflict, digest, identifier, utcnow, valid_hash
 from ..processing.transcript import validate_result
+from .audio import audio_duration
 
 CALL_TIMEZONE = timezone(timedelta(hours=9))
 
@@ -179,11 +179,12 @@ class Service:
     def ingest(self, name, completed_sha256):
         """Producer supplies a checksum only after closing its completed transfer.
 
-        No directory watcher guesses completion from file size/age. Initially PCM
-        WAV only; other phone codecs need the later isolated decoder integration.
+        No directory watcher guesses completion from file size or age.
         """
         valid_hash(completed_sha256)
         source = self.safe_path('sync-inbox', name)
+        if source.suffix.lower() == '.part':
+            raise Conflict('TRANSFER_INCOMPLETE')
         key, now = uuid4(), self.clock()
         part = self.safe_path('quarantine', str(key) + '.part')
         target = self.safe_path('quarantine', str(key))
@@ -211,19 +212,8 @@ class Service:
                         or size != before.st_size or sha.hexdigest() != completed_sha256
                         or final_hash != completed_sha256):
                     raise Conflict('TRANSFER_INCOMPLETE')
-                try:
-                    with wave.open(str(part), 'rb') as audio:
-                        frames = audio.getnframes()
-                        duration = frames / audio.getframerate()
-                        if not 0 < duration <= 7200 or audio.getnchannels() not in (1, 2):
-                            raise Conflict('INVALID_AUDIO')
-                        remaining = frames * audio.getnchannels() * audio.getsampwidth()
-                        while chunk := audio.readframes(65536):
-                            remaining -= len(chunk)
-                        if remaining != 0:
-                            raise Conflict('INVALID_AUDIO')
-                except (wave.Error, EOFError, ZeroDivisionError):
-                    raise Conflict('INVALID_AUDIO') from None
+                with part.open('rb') as audio:
+                    duration = audio_duration(audio, source.suffix.lower())
                 row = conn.execute('SELECT * FROM callops.recordings WHERE sha256=%s FOR UPDATE',
                                    (completed_sha256,)).fetchone()
                 if row is None:

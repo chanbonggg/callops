@@ -9,6 +9,7 @@ from starlette.routing import Route
 from starlette.templating import Jinja2Templates
 
 from ..common import Conflict, digest
+from .audio import PCM_PREVIEW_TYPES, media_type, pcm_clip, pcm_preview
 from .service import CALL_TIMEZONE
 
 
@@ -41,9 +42,21 @@ def routes(service):
         })
 
     def audio(request):
+        preview = request.query_params.get('play') == 'pcm'
+        segment = None
+        if 'segment_id' in request.path_params:
+            _, _, result = service.transcript(request.path_params['recording_id'],
+                                              request.path_params['artifact_id'])
+            position = request.path_params['segment_id'] - 1
+            if result['schema_version'] != 2 or not 0 <= position < len(result['segments']):
+                raise HTTPException(404)
+            segment = result['segments'][position]
+            if segment['start'] == segment['end']:
+                raise HTTPException(404)
         with service.transaction() as conn:
             row = service.recording(conn, request.path_params['recording_id'])
             if (row['classification_status'] in ('PRIVATE_EXCLUDED', 'EXPIRED') or row['deletion_state'] != 'NONE'
+                    or ((preview or segment) and row['classification_status'] != 'BUSINESS_APPROVED')
                     or (row['classification_status'] != 'BUSINESS_APPROVED' and row['expires_at'] <= service.clock())
                     or row['received_at'] + timedelta(days=30) <= service.clock()):
                 raise HTTPException(410)
@@ -51,7 +64,17 @@ def routes(service):
             data = service.audio_path(row).read_bytes()
         if digest(data) != row['sha256']:
             raise Conflict('INPUT_CORRUPT')
-        return Response(data, media_type='audio/wav')
+        kind = media_type(data[:12])
+        if segment or (preview and kind in PCM_PREVIEW_TYPES):
+            converted = (pcm_clip(data, kind, segment['start'], segment['end']) if segment
+                         else pcm_preview(data, kind))
+            with service.transaction() as conn:
+                row = service.recording(conn, row['id'])
+                if (row['classification_status'] != 'BUSINESS_APPROVED' or row['deletion_state'] != 'NONE'
+                        or row['received_at'] + timedelta(days=30) <= service.clock()):
+                    raise HTTPException(410)
+            return Response(converted, media_type='audio/wav')
+        return Response(data, media_type=kind)
 
     def classify(request):
         service.classify(request.path_params['recording_id'], request.state.form.get('decision'))
@@ -63,5 +86,6 @@ def routes(service):
         Route('/recordings/{recording_id:uuid}', detail),
         Route('/recordings/{recording_id:uuid}/transcripts/{artifact_id:uuid}', detail, name='transcript'),
         Route('/recordings/{recording_id:uuid}/audio', audio),
+        Route('/recordings/{recording_id:uuid}/transcripts/{artifact_id:uuid}/audio/{segment_id:int}', audio),
         Route('/recordings/{recording_id:uuid}/classify', classify, methods=['POST']),
     ]

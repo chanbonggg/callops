@@ -18,12 +18,12 @@ python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3
 ## 수집·분류
 
 - 데이터 루트는 Git 밖의 전용 경로다. `sync-inbox`, `quarantine`, `artifacts`만 관리한다. 휴대전화 원본 경로를 받지 않는다.
-- 초기 입력은 PCM WAV, 최대 500MiB·2시간·1~2채널이다. 확장자 대신 WAV 헤더와 실제 프레임 길이를 검사한다. m4a/amr 변환은 아직 없다. 상한 부하·실기기 호환 검증은 별도다.
-- 수신 도구가 파일을 닫고 완료를 확정한 뒤 제공한 SHA-256을 입력한다. 앱이 파일 크기 안정만 보고 완료 신호를 만들어내지 않는다. 복사 전후 속성·두 번의 해시·격리 사본 판독을 검사한다.
+- 수신 형식은 PCM WAV, AAC·ALAC M4A, MP3, AMR-NB·WB다. 입력 상한은 500MiB·2시간·1~2채널이다. 확장자와 파일 헤더의 일치를 확인하고 PCM 프레임을 읽거나 PyAV로 단일 음성 스트림을 디코딩해 코덱·채널·길이·손상을 검사한다. 이때 모델을 호출하거나 디코딩 결과를 저장하지 않는다. 상한 부하·실기기 호환은 별도 검증한다.
+- 수신 도구가 파일을 닫고 완료를 확정한 뒤 제공한 SHA-256을 입력한다. `.part`는 완료 해시를 전달해도 무시하며, 앱이 파일 크기 안정만 보고 완료 신호를 만들지 않는다. 복사 전후 속성·두 번의 해시·격리 사본 판독을 검사한다. 유효한 프레임 경계에서 잘린 파일의 원래 길이는 디코더에서 확인할 수 없어 송신 측 원본 해시가 필요하다.
 - SHA-256으로 녹음을 중복 제거하고 수신별 사본을 기록한다. 파일명은 화면·로그에 노출하지 않으며 경로 구분자·스트림·심볼릭 링크·Windows reparse point를 거부한다. 전용 루트와 그 상위 디렉터리는 신뢰된 서비스 계정만 수정할 수 있어야 한다. 실제 ACL 구성은 C1/C7 검증 대상이다.
 - 미분류·보류는 최초 수신 72시간 후 만료한다. 보류는 기한을 연장하지 않는다. 업무 분류와 STT 작업 INSERT는 같은 트랜잭션이다. 중복 승인으로 작업을 늘리지 않는다.
 - 사적 선택/미분류 만료는 inbox·격리·파생 파일을 복사본별로 청소한다. 한 사본에서 실패해도 나머지는 정리하며, 실패나 워커 미확인이 남으면 완료로 표시하지 않는다. 같은 이름의 새 수신 파일은 보존한다. 새 콘텐츠 수신이 검증되면 해당 경로의 이전 수신 기록을 정리된 것으로 표시한다.
-- 거부된 파일은 처음 거부한 때부터 24시간 청소 대상으로 등록한다. 같은 파일을 다시 거부해도 기한은 연장되지 않는다. 같은 경로에서 교체된 파일이 새로 거부되면 새 파일 기준으로 24시간을 계산한다.
+- 완료 검사까지 넘겨진 뒤 거부된 파일은 처음 거부한 때부터 24시간 청소 대상으로 등록한다. 같은 파일을 다시 거부해도 기한은 연장되지 않는다. 같은 경로에서 교체된 파일이 새로 거부되면 새 파일 기준으로 24시간을 계산한다. 전송 중인 `.part`는 수신 도구가 관리한다.
 
 가짜 파일을 전용 inbox에 수신 완료한 뒤 사용하는 명령:
 
@@ -31,6 +31,8 @@ python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3
 python scripts/manage.py ingest --name completed.wav --sha256 PRODUCER_COMPLETION_SHA256
 python scripts/manage.py maintain
 ```
+
+수집 CLI는 완료 해시 불일치·임시 파일을 `TRANSFER_INCOMPLETE`, 잘못된 해시 표기를 `INVALID_HASH`, 미지원 확장자·코덱·스트림을 `UNSUPPORTED_AUDIO_FORMAT`, 형식 위장·손상·상한 초과를 `INVALID_AUDIO`로 표시한다. 파일명과 비밀값은 오류 출력에서 제외한다.
 
 `maintain`은 만료·사본 청소·임대 회수·파일/DB 복구를 한 번 실행한다. 주기 실행 서비스는 아직 설치하지 않았다. 운영 전 C1에서 주기를 설정해야 한다. 조회 GET은 만료 데이터를 차단하지만 삭제나 업무 상태 변경을 수행하지 않는다.
 
@@ -49,6 +51,8 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 로그인 CSRF, Secure/HttpOnly/SameSite 쿠키, DB 세션 8시간 만료, 로그아웃 시 서버 세션 폐기, 로그인 실패 제한을 적용한다. 목록·음성·분류 모두 사용자 세션이 필요하다. 분류/로그아웃은 POST와 CSRF를 검사한다. 워커 Bearer 토큰은 워커 API에 사용한다. 브라우저 요청 본문은 16KiB, 워커 요청 본문은 8MiB로 제한한다. 기존 Flask 세션 쿠키를 사용하던 브라우저는 Starlette로 전환 후 다시 로그인한다. 기존 scrypt 비밀번호 해시로 로그인할 수 있다. [Starlette 미들웨어 문서](https://starlette.dev/middleware/)
 
 목록은 최근 200건이며 페이지 이동·원격 배포·브라우저 시각 검수는 아직 없다. 음성 응답은 한 파일을 메모리로 읽으므로 최대 크기 동시 재생의 성능은 검증하지 않았다.
+
+원음 응답은 확인된 컨테이너에 맞는 MIME 타입을 반환한다. 통화 목록과 상세의 오디오 플레이어는 원음 재생에 실패한 경우 업무 승인된 M4A·AMR을 모노 16kHz PCM WAV로 변환해 재생할 수 있다. 호환 응답은 요청 시 메모리에서 만들며 디스크에 추가 사본을 생성하지 않는다. 변환 중 사적 전환이나 만료가 발생하면 응답을 차단한다.
 
 ### 통화 상대와 실제 통화 시각
 
@@ -79,7 +83,7 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 
 수락 파일은 part 기록·fsync·rename 후 artifact 참조, 작업 성공, 다음 분석 작업을 한 DB 트랜잭션으로 저장한다. 성공 확정 직전에 임대·업로드·입력 보관 기한을 다시 검사한다. 기한을 넘긴 결과는 후보와 DB 참조를 롤백하고 해당 파일을 삭제한다. 재시작 때 참조 없는 생성 파일을 정리하고, 참조 파일이 없으면 INPUT_MISSING으로 수동 확인한다. 프로세스/DB 실패 복구를 검증하며 전원 차단에 대한 파일시스템 내구성 시험은 하지 않았다.
 
-`src/callops/processing/fake_worker.py`는 실제 워커 API를 통해 합성 결과를 처리한다. 전사 ACK 후 로컬 파일을 지워도 새 워커가 서버 artifact를 받아 분석한다. 결과에는 job·attempt·input ID/버전/해시가 포함된다. 가짜 STT 워커는 PCM WAV의 길이와 가상 텍스트로 구간 결과를 만든다. 가짜 분석 워커는 기본으로 합성 텍스트를 반환하고, `events`를 명시하면 합성 일정 후보를 반환한다. 실제 모델과 장시간 워커 heartbeat 스레드·연산 프로세스 종료·지속 spool 재개는 P4/P5/D5 구현 대상이다.
+`src/callops/processing/fake_worker.py`는 실제 워커 API를 통해 합성 결과를 처리한다. 전사 ACK 후 로컬 파일을 지워도 새 워커가 서버 artifact를 받아 분석한다. 결과에는 job·attempt·input ID/버전/해시가 포함된다. 가짜 STT 워커는 수신과 같은 디코더에서 읽은 재생 길이와 가상 텍스트로 구간 결과를 만든다. 가짜 분석 워커는 기본으로 합성 텍스트를 반환하고, `events`를 명시하면 합성 일정 후보를 반환한다. 실제 모델과 장시간 워커 heartbeat 스레드·연산 프로세스 종료·지속 spool 재개는 P4/P5/D5 구현 대상이다.
 
 ### 합성 전사 결과 스키마와 조회
 
@@ -89,7 +93,7 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 
 `GET /recordings/{id}`는 통화 상세와 최신 수락 STT 전사를 보여준다. `GET /recordings/{id}/transcripts/{artifact_id}#segment-{segment_id}`는 전사 버전과 구간을 고정한다. 사용자 세션이 필요하며 다른 통화의 artifact, 사적·삭제·만료 자료를 거부한다. 파일 해시·크기를 확인하고 기존 텍스트 결과는 시간 구간 없이 표시한다. GET은 보관 상태나 파일을 변경하지 않는다.
 
-원음의 초기 30일 기한이 지나도 유효한 전사 90일 기한 안에서는 전사를 조회할 수 있다. 원음을 사용할 수 없으면 원음 링크를 숨긴다. 시간 링크는 미디어 fragment를 사용하며, 실제 브라우저 재생 호환성은 별도 검증한다. [미디어 fragment 안내](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Audio_and_video_delivery)
+원음의 초기 30일 기한이 지나도 유효한 전사 90일 기한 안에서는 전사를 조회할 수 있다. 원음을 사용할 수 없거나 구간 길이가 0이면 구간 재생 링크를 숨긴다. `GET /recordings/{id}/transcripts/{artifact_id}/audio/{segment_id}`는 저장된 시작·끝 시각으로 해당 구간만 WAV로 반환한다. 압축 원음은 메모리에서 PCM으로 디코딩하며 구간 파일을 보관하지 않는다. 응답 직전에 업무 승인과 원음 기한을 다시 확인한다.
 
 ### 전사 내용 검색
 

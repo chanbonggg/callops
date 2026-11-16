@@ -40,7 +40,7 @@ value="{{ row.call_started_at.astimezone(call_timezone).strftime('%Y-%m-%dT%H:%M
 <p>삭제: {{ row.deletion_state }}</p>
 {% if metadata_visible %}<p><a href="/recordings/{{ row.id }}">전사 상세</a></p>{% endif %}
 {% if row.classification_status not in ('PRIVATE_EXCLUDED','EXPIRED') %}
-<audio controls preload="none" src="/recordings/{{ row.id }}/audio"></audio>
+{% include 'audio.html' %}
 <form method="post" action="/recordings/{{ row.id }}/classify">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <button name="decision" value="BUSINESS_APPROVED">업무 · AI 처리 승인</button>

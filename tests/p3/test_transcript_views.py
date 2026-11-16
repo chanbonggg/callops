@@ -1,4 +1,6 @@
+import io
 import json
+import wave
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
@@ -108,7 +110,7 @@ class TranscriptViewTests(ProductCase):
         self.assertNotIn('<script>예시 문구</script>', page.text)
         self.assertIn('&lt;script&gt;', page.text)
         self.assertIn(path + '#segment-2', page.text)
-        self.assertIn('/audio#t=0.5,1', page.text)
+        self.assertIn(path + '/audio/2', page.text)
         self.assertIn(recording, self.http('GET', '/').text)
         self.assertEqual(self.http('GET', path).status_code, 200)
         worker = FakeWorker(self.http, self.tokens['one'], Path(self.temp.name) / 'worker', lambda: self.now)
@@ -118,6 +120,24 @@ class TranscriptViewTests(ProductCase):
                              headers={'Authorization': 'Bearer ' + self.tokens['one'],
                                       'X-Lease-Token': analysis['lease_token']})
         self.assertEqual(response.content, data)
+
+    def test_citation_audio_contains_only_the_authorized_samples(self):
+        original = self.wav()
+        recording, job, data, report = self.prepare_transcript(recording=self.ingest(original))
+        artifact = self.upload(job, data, report).json()['artifact_id']
+        path = f'/recordings/{recording}/transcripts/{artifact}/audio/2'
+        self.assertEqual(self.http('GET', path).status_code, 401)
+        self.login()
+        response = self.http('GET', path)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['content-type'], 'audio/wav')
+        with wave.open(io.BytesIO(original), 'rb') as source, wave.open(io.BytesIO(response.content), 'rb') as clip:
+            self.assertEqual(clip.getnframes(), 4000)
+            source.setpos(4000)
+            self.assertEqual(clip.readframes(4000), source.readframes(4000))
+        self.assertEqual(self.http('GET', path[:-1] + '3').status_code, 404)
+        self.service.classify(recording, 'PRIVATE_EXCLUDED')
+        self.assertEqual(self.http('GET', path).status_code, 409)
 
     def test_pending_private_and_other_recording_cannot_expose_a_transcript(self):
         recording, job, data, report = self.prepare_transcript()
@@ -166,15 +186,18 @@ class TranscriptViewTests(ProductCase):
 
     def test_audio_expiry_hides_playback_links_but_retains_the_unexpired_transcript(self):
         recording, job, data, report = self.prepare_transcript()
-        self.assertEqual(self.upload(job, data, report).status_code, 200)
+        result = self.upload(job, data, report)
+        self.assertEqual(result.status_code, 200)
+        artifact = result.json()['artifact_id']
         self.advance(days=31)
         self.login()
         page = self.http('GET', '/recordings/' + recording)
         self.assertEqual(page.status_code, 200)
         self.assertIn('가상 상담을 확인합니다.', page.text)
-        self.assertNotIn('/audio#t=', page.text)
+        self.assertNotIn(f'/transcripts/{artifact}/audio/', page.text)
         self.assertIn('원음을 재생할 수 없습니다.', page.text)
         self.assertEqual(self.http('GET', '/recordings/' + recording + '/audio').status_code, 410)
+        self.assertEqual(self.http('GET', f'/recordings/{recording}/transcripts/{artifact}/audio/1').status_code, 410)
 
     def test_cancelled_upload_and_real_model_results_remain_rejected(self):
         recording, job, data, report = self.prepare_transcript(synthetic=False)
