@@ -50,7 +50,7 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 
 로그인 CSRF, Secure/HttpOnly/SameSite 쿠키, DB 세션 8시간 만료, 로그아웃 시 서버 세션 폐기, 로그인 실패 제한을 적용한다. 목록·음성·분류 모두 사용자 세션이 필요하다. 분류/로그아웃은 POST와 CSRF를 검사한다. 워커 Bearer 토큰은 워커 API에 사용한다. 브라우저 요청 본문은 16KiB, 워커 요청 본문은 8MiB로 제한한다. 기존 Flask 세션 쿠키를 사용하던 브라우저는 Starlette로 전환 후 다시 로그인한다. 기존 scrypt 비밀번호 해시로 로그인할 수 있다. [Starlette 미들웨어 문서](https://starlette.dev/middleware/)
 
-목록은 최근 200건이며 페이지 이동·원격 배포·브라우저 시각 검수는 아직 없다. 음성 응답은 한 파일을 메모리로 읽으므로 최대 크기 동시 재생의 성능은 검증하지 않았다.
+목록에는 최근 200건이 표시된다. 브라우저 조작 증거와 Figma 반영 상태는 [화면별 상태](progress-checklist.md#화면별-상태)를 참고한다. 음성 응답은 한 파일을 메모리로 읽으므로 최대 크기 동시 재생의 성능은 검증하지 않았다.
 
 원음 응답은 확인된 컨테이너에 맞는 MIME 타입을 반환한다. 통화 목록과 상세의 오디오 플레이어는 원음 재생에 실패한 경우 업무 승인된 M4A·AMR을 모노 16kHz PCM WAV로 변환해 재생할 수 있다. 호환 응답은 요청 시 메모리에서 만들며 디스크에 추가 사본을 생성하지 않는다. 변환 중 사적 전환이나 만료가 발생하면 응답을 차단한다.
 
@@ -87,13 +87,38 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 
 ### 합성 전사 결과 스키마와 조회
 
-공통 필드는 `schema_version`·`job_id`·`attempt_id`·`input_artifact_id`·`input_artifact_version`·`input_sha256`·`synthetic`다. `synthetic`은 true여야 한다. 기존 버전 1은 `text` 필드를 사용하며 STT·ANALYSIS 결과로 계속 수락한다. STT 버전 2는 `segments`, ANALYSIS 버전 2는 `events`를 사용한다.
+공통 필드는 `schema_version`·`job_id`·`attempt_id`·`input_artifact_id`·`input_artifact_version`·`input_sha256`·`synthetic`다. `synthetic`은 true여야 한다. 기존 버전 1은 `text` 필드를 사용하며 STT·ANALYSIS 결과로 계속 수락한다. STT 버전 2는 `segments`, ANALYSIS 버전 2는 `events`와 선택 필드 `summary`를 사용한다.
 
 각 구간은 `segment_id`·`start`·`end`·`text`만 포함한다. ID는 1부터 연속된 정수이고 시작 시각은 비감소 순서다. 시각은 0부터 수신 시 검증한 음성 길이 이내이며 bool·비유한 값·역순·잘못된 범위를 거부한다. 최대 10,000구간·전체 텍스트 100,000자·결과 파일 8MiB를 적용한다. 빈 구간 배열은 구간 없는 합성 결과로 표시한다.
 
 `GET /recordings/{id}`는 통화 상세와 최신 수락 STT 전사를 보여준다. `GET /recordings/{id}/transcripts/{artifact_id}#segment-{segment_id}`는 전사 버전과 구간을 고정한다. 사용자 세션이 필요하며 다른 통화의 artifact, 사적·삭제·만료 자료를 거부한다. 파일 해시·크기를 확인하고 기존 텍스트 결과는 시간 구간 없이 표시한다. GET은 보관 상태나 파일을 변경하지 않는다.
 
 원음의 초기 30일 기한이 지나도 유효한 전사 90일 기한 안에서는 전사를 조회할 수 있다. 원음을 사용할 수 없거나 구간 길이가 0이면 구간 재생 링크를 숨긴다. `GET /recordings/{id}/transcripts/{artifact_id}/audio/{segment_id}`는 저장된 시작·끝 시각으로 해당 구간만 WAV로 반환한다. 압축 원음은 메모리에서 PCM으로 디코딩하며 구간 파일을 보관하지 않는다. 응답 직전에 업무 승인과 원음 기한을 다시 확인한다.
+
+### 합성 요약 결과 스키마와 조회
+
+기존 `POST /worker/jobs/{job_id}/result`에 제출하는 버전 2 분석 결과 예시다. 아래 ID·버전·해시는 예시 값이다. 실제 제출 시 claim 응답의 값들을 사용하며 `attempt_id`에는 `copy_key`를 넣는다. 일정 후보가 없으면 `events`는 빈 배열을 보낸다.
+
+```json
+{
+  "schema_version": 2,
+  "synthetic": true,
+  "job_id": "00000000-0000-0000-0000-000000000001",
+  "attempt_id": "00000000-0000-0000-0000-000000000002",
+  "input_artifact_id": "00000000-0000-0000-0000-000000000003",
+  "input_artifact_version": 1,
+  "input_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "events": [],
+  "summary": {
+    "text": "거래처와 방문 상담 일정을 논의했다.",
+    "segment_ids": [1, 2]
+  }
+}
+```
+
+`summary`를 보내면 `text`와 `segment_ids`가 모두 필요하다. `text`는 공백만으로 이루어지지 않은 UTF-8 문자열이며 최대 4,000자다. `segment_ids`는 분석 작업에 고정된 버전 2 전사에 실제로 존재하는 양의 정수 ID 1~10개다. 중복 ID는 거절한다. 작성할 요약이 없으면 필드 자체를 생략한다. 잘못된 요약·근거는 전체 결과를 `409 INVALID_RESULT`로 거절한다.
+
+요약은 기존 분석 결과 파일에 저장된다. 로그인한 사용자의 통화 상세는 현재 표시 중인 전사에 연결된 성공 결과의 요약과 근거 링크를 보여준다. 분석 결과가 유실·손상·만료되어도 유효한 전사는 계속 조회할 수 있다.
 
 ### 전사 내용 검색
 
@@ -146,7 +171,7 @@ worker.once(events=[{
 
 전사 근거가 만료되면 현재 일정은 남고 합의 상세·근거 링크·신규 전송은 차단된다. 통화 전체 삭제나 사적 전환 시 일정의 제목·시각·원본 연결을 지운다. 이미 생성된 이벤트의 중복 방지를 위해 일정 ID와 전송 식별 기록을 유지한다.
 
-이 경로는 로컬 PostgreSQL의 모의 제공자를 사용한다. 실제 Google Calendar와 OAuth, 할 일 관리는 후속 범위다.
+이 경로는 로컬 PostgreSQL의 모의 제공자를 사용한다. 실제 Google Calendar와 OAuth는 후속 범위다. 직접 입력 할 일은 [별도 화면](#직접-입력-할-일-화면)에서 관리하며 통화에서 나온 할 일의 승인·연결은 [진행 체크리스트](progress-checklist.md#3-통화에서-나온-할-일-승인)에서 관리한다.
 
 ### 직접 입력 일정 화면
 
