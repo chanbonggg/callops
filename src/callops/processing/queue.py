@@ -213,6 +213,11 @@ class Queue:
                         raise ValueError('Invalid transcript source')
                     transcript = self.service.read_transcript_artifact(source, recording['duration_seconds'])
                     candidates = validated_events(payload['events'], transcript)
+                    if 'summary' in payload and (
+                        transcript['schema_version'] != 2
+                        or max(payload['summary']['segment_ids']) > len(transcript['segments'])
+                    ):
+                        raise ValueError('Invalid summary evidence')
             except Conflict:
                 raise
             except (ValueError, OverflowError, RecursionError):

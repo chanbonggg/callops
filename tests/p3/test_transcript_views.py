@@ -1,9 +1,12 @@
 import io
 import json
+import runpy
+import sys
 import wave
 from copy import deepcopy
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from callops.processing.fake_worker import FakeWorker
@@ -208,7 +211,19 @@ class TranscriptViewTests(ProductCase):
         self.assertEqual([str(match['recording_id']) for match in matches], [kept])
 
     def test_structured_transcript_round_trip_ack_and_immutable_source_links(self):
-        recording, job, data, report = self.prepare_transcript()
+        module = Path(__file__).resolve().parents[2] / 'ai-worker/app/transcriber.py'
+        transcribe_audio = runpy.run_path(str(module))['transcribe_audio']
+        audio = Path(self.temp.name) / 'sample.wav'
+        audio.write_bytes(self.wav())
+        model = Mock()
+        model.transcribe.return_value = (iter([
+            SimpleNamespace(start=0, end=0.5, text=' 가상 상담을 확인합니다. '),
+            SimpleNamespace(start=0.5, end=1, text='<script>예시 문구</script>'),
+        ]), SimpleNamespace(duration=1, language='ko'))
+        with patch.dict(sys.modules, {'faster_whisper': SimpleNamespace(WhisperModel=Mock(return_value=model))}):
+            output = transcribe_audio(audio)
+        recording, job, data, report = self.prepare_transcript(
+            recording=self.ingest(audio.read_bytes()), segments=output['segments'])
         result = self.upload(job, data, report)
         self.assertEqual(result.status_code, 200)
         artifact = result.json()['artifact_id']
@@ -234,6 +249,44 @@ class TranscriptViewTests(ProductCase):
                              headers={'Authorization': 'Bearer ' + self.tokens['one'],
                                       'X-Lease-Token': analysis['lease_token']})
         self.assertEqual(response.content, data)
+
+    def test_analysis_summary_uses_the_same_transcript_after_retry(self):
+        requests = {}
+
+        def transport(method, path, **kwargs):
+            response = self.http(method, path, **kwargs)
+            if path == '/worker/claim':
+                requests['job'] = response.json()
+            if path.endswith('/result'):
+                requests['upload'] = (method, path, kwargs)
+                requests['status'] = response.status_code
+            return response
+
+        recording = self.ingest()
+        self.service.classify(recording, 'BUSINESS_APPROVED')
+        worker = FakeWorker(transport, self.tokens['one'], Path(self.temp.name) / 'worker', lambda: self.now)
+        transcript = worker.once()['artifact_id']
+        source = f'/recordings/{recording}/transcripts/{transcript}'
+        self.login()
+        self.assertNotIn('합성 요약', self.http('GET', source).text)
+        with self.assertRaises(RuntimeError):
+            worker.once(summary={'text': '잘못된 근거', 'segment_ids': [2]})
+        self.assertEqual(requests['status'], 409)
+        failed = requests['job']
+        self.assertEqual(self.api('failed', failed, json={'code': 'UPLOAD_ERROR'}).status_code, 200)
+        self.advance(minutes=1)
+        accepted = worker.once(summary={'text': '<script>가상 상담 요약</script>', 'segment_ids': [1]})
+        self.assertEqual(requests['job']['job_id'], failed['job_id'])
+        self.assertEqual(requests['job']['input_artifact_id'], transcript)
+        self.assertEqual(self.http(*requests['upload'][:2], **requests['upload'][2]).json(), accepted)
+        page = self.http('GET', '/recordings/' + recording)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('&lt;script&gt;가상 상담 요약&lt;/script&gt;', page.text)
+        self.assertIn(f'href="{source}#segment-1">요약 근거 1', page.text)
+        self.assertIn('id="segment-1"', self.http('GET', source).text)
+        self.service.safe_path('artifacts', accepted['artifact_id']).unlink()
+        self.assertNotIn('합성 요약', self.http('GET', source).text)
+        self.assertIn('합성 전사', self.http('GET', source).text)
 
     def test_citation_audio_contains_only_the_authorized_samples(self):
         original = self.wav()

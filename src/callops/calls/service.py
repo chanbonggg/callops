@@ -132,7 +132,7 @@ class Service:
         with self.transaction() as conn:
             return conn.execute(query, values).fetchall()
 
-    def transcript(self, recording_id, artifact_id=None):
+    def transcript(self, recording_id, artifact_id=None, *, include_summary=False):
         with self.transaction() as conn:
             row = self.recording(conn, recording_id)
             if (row['classification_status'] in ('PRIVATE_EXCLUDED', 'EXPIRED')
@@ -155,9 +155,32 @@ class Service:
                 return row, None, None
             if row['classification_status'] != 'BUSINESS_APPROVED':
                 raise Conflict('APPROVAL_REVOKED')
-            return row, artifact, self.read_transcript_artifact(artifact, row['duration_seconds'])
+            result = self.read_transcript_artifact(artifact, row['duration_seconds'])
+            if include_summary:
+                row['summary'] = self.analysis_summary(conn, row, artifact)
+            return row, artifact, result
+
+    def analysis_summary(self, conn, recording, transcript):
+        artifact = conn.execute("""SELECT f.* FROM callops.jobs j
+            JOIN callops.attempts a ON a.id=j.active_attempt
+            JOIN callops.artifacts f ON f.id=a.result_artifact_id
+            WHERE j.recording_id=%s AND j.input_artifact_id=%s
+                AND j.stage='ANALYSIS' AND j.status='SUCCEEDED'
+            ORDER BY j.pipeline_version DESC, f.id DESC LIMIT 1""",
+            (recording['id'], transcript['id'])).fetchone()
+        if artifact is None:
+            return None
+        try:
+            result = self.read_result_artifact(artifact, 'ANALYSIS', recording['duration_seconds'])
+        except Conflict:
+            # A missing or expired analysis must not hide the valid transcript.
+            return None
+        return result.get('summary')
 
     def read_transcript_artifact(self, artifact, duration_seconds):
+        return self.read_result_artifact(artifact, 'STT', duration_seconds)
+
+    def read_result_artifact(self, artifact, stage, duration_seconds):
         """Read an authorized artifact while the caller holds the transaction."""
         if not artifact['available'] or artifact['expires_at'] <= self.clock():
             raise Conflict('TRANSCRIPT_UNAVAILABLE')
@@ -172,7 +195,7 @@ class Service:
         if len(data) != size or digest(data) != artifact['sha256']:
             raise Conflict('INPUT_CORRUPT')
         try:
-            return validate_result(json.loads(data), 'STT', duration_seconds)
+            return validate_result(json.loads(data), stage, duration_seconds)
         except (ValueError, UnicodeError, RecursionError):
             raise Conflict('INPUT_CORRUPT') from None
 

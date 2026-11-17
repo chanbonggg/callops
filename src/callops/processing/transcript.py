@@ -40,8 +40,20 @@ def validate_result(payload, stage, duration):
             raise ValueError('Invalid timestamped result')
         validate_segments(payload['segments'], duration)
     elif payload['schema_version'] == 2 and stage == 'ANALYSIS':
-        if set(payload) != ENVELOPE_FIELDS | {'events'}:
+        fields = ENVELOPE_FIELDS | {'events'}
+        if set(payload) not in (fields, fields | {'summary'}):
             raise ValueError('Invalid synthetic analysis result')
+        if 'summary' in payload:
+            summary = payload['summary']
+            if not isinstance(summary, dict) or set(summary) != {'text', 'segment_ids'}:
+                raise ValueError('Invalid summary')
+            text, ids = summary['text'], summary['segment_ids']
+            if (not isinstance(text, str) or not text.strip() or len(text) > 4000
+                    or not isinstance(ids, list) or not 1 <= len(ids) <= 10
+                    or any(type(segment_id) is not int or segment_id < 1 for segment_id in ids)
+                    or len(set(ids)) != len(ids)):
+                raise ValueError('Invalid summary')
+            text.encode('utf-8')
     else:
         raise ValueError('Unsupported result schema')
     return payload

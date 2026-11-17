@@ -12,6 +12,15 @@
 {% include 'audio.html' %}
 {% else %}<p>원음을 재생할 수 없습니다.</p>{% endif %}
 {% if result %}
+{% if row.summary %}
+<h2>합성 요약</h2>
+<p>{{ row.summary.text }}</p>
+<ul>
+{% for segment_id in row.summary.segment_ids %}
+<li><a href="/recordings/{{ row.id }}/transcripts/{{ artifact.id }}#segment-{{ segment_id }}">요약 근거 {{ segment_id }}</a></li>
+{% endfor %}
+</ul>
+{% endif %}
 <h2>합성 전사</h2><p>서버 기능 검증용 가상 결과입니다.</p>
 <p>전사 버전 {{ artifact.version }} · {{ artifact.id }}</p>
 {% if result.schema_version == 2 %}

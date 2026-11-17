@@ -33,7 +33,7 @@ def routes(service):
 
     def detail(request):
         row, artifact, result = service.transcript(request.path_params['recording_id'],
-                                                   request.path_params.get('artifact_id'))
+                                                   request.path_params.get('artifact_id'), include_summary=True)
         audio_available = (row['received_at'] + timedelta(days=30) > service.clock()
                            and service.audio_path(row).is_file())
         return TEMPLATES.TemplateResponse(request, 'detail.html', {
