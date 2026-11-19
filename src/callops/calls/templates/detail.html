@@ -1,37 +1,139 @@
-<!doctype html><html lang="ko"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>CallOps 통화 상세</title>
-<a href="/">통화 목록</a><h1>{{ row.counterparty or '상대 미확인' }} 통화 상세</h1>
-<p>{{ row.id }} · {{ row.classification_status }}</p>
-{% if row.classification_status == 'BUSINESS_APPROVED' %}
-<p><a href="/recordings/{{ row.id }}/schedule">일정 후보 검토</a></p>
+{% extends "layout.html" %}
+{% from "call_fields.html" import call_date, timecode %}
+{% set main_class = "callops-page call-detail" %}
+{% set recording_url = '/recordings/' ~ row.id %}
+{% set source = recording_url ~ '/transcripts/' ~ artifact.id if artifact else '' %}
+{% set editable = row.classification_status in ('PENDING', 'DEFERRED') %}
+{% block title %}{{ '전사 근거' if pinned else '통화 상세' }}{% endblock %}
+{% block head %}
+{% if audio_available and not pinned %}<script defer src="/task-assets/call-audio.js"></script>{% endif %}
+{% endblock %}
+{% block content %}
+<a class="button secondary standalone" href="{{ recording_url if pinned else '/' }}">‹ {{ '통화 상세' if pinned else '통화 목록' }}</a>
+<div>
+  <h1>{{ '전사 근거' if pinned else (row.counterparty or '상대 미확인') }}</h1>
+  <p class="hint">{% if pinned %}{{ row.counterparty or '상대 미확인' }} · {% endif %}{{ call_date(row.call_started_at, call_timezone) }}
+    {%- if pinned %} · 전사 버전 {{ artifact.version }}{% elif row.call_started_at %} · 한국 시간{% endif %}</p>
+</div>
+
+{% if not pinned %}
+<section class="card">
+  <h2>원본 녹음</h2>
+  {% if audio_available %}
+  <button type="button" class="audio-start hint standalone" aria-label="원본 녹음 재생" hidden>
+    <img src="/task-assets/play.svg" alt=""> 0:00 / {{ timecode(row.duration_seconds, pad_minutes=false) }}
+  </button>
+  {% include 'audio.html' %}
+  <p class="hint audio-error" role="status" hidden>원음을 재생할 수 없습니다.</p>
+  {% else %}
+  <p class="hint">원음을 재생할 수 없습니다.</p>
+  {% endif %}
+</section>
 {% endif %}
-<p>통화 시각 한국 시간
-{% if row.call_started_at %}{{ row.call_started_at.astimezone(call_timezone).strftime('%Y-%m-%d %H:%M:%S') }}
-{% else %}미확인{% endif %}</p>
-{% if audio_available %}
-{% include 'audio.html' %}
-{% else %}<p>원음을 재생할 수 없습니다.</p>{% endif %}
+
+{% if editable %}
+<form class="card" method="post" action="{{ recording_url }}/metadata">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <h2>통화 정보</h2>
+  <label>통화 상대 <input name="counterparty" maxlength="100" value="{{ form.get('counterparty', '') if form else (row.counterparty or '') }}"></label>
+  {% set local = row.call_started_at.astimezone(call_timezone) if row.call_started_at else none %}
+  <label>실제 통화 시각 · 한국 시간
+    <input type="datetime-local" step="1" name="call_started_at"
+           value="{{ form.get('call_started_at', '') if form else (local.strftime('%Y-%m-%dT%H:%M:%S' if local.second else '%Y-%m-%dT%H:%M') if local else '') }}">
+  </label>
+  {% if error %}<p role="alert" class="error">{{ error }}</p>{% endif %}
+  <button class="secondary standalone">통화 정보 저장</button>
+</form>
+<form class="card" method="post" action="{{ recording_url }}/classify">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="call-heading"><h2>통화 분류</h2><span class="count schedule-pending">{{ '보류' if row.classification_status == 'DEFERRED' else '미분류' }}</span></div>
+  <p class="hint">업무로 지정하면 AI 처리를 승인합니다. 통화 정보는 먼저 저장해 주세요.</p>
+  <button class="primary" name="decision" value="BUSINESS_APPROVED">업무로 지정</button>
+  <div class="actions">
+    <button class="secondary" name="decision" value="DEFERRED">보류</button>
+    <button class="danger" name="decision" value="PRIVATE_EXCLUDED">사적 통화</button>
+  </div>
+  <p class="hint">사적으로 지정하면 서버의 관리 사본을 삭제합니다.</p>
+</form>
+{% elif not pinned %}
+  {% if row.summary %}
+  <section class="card">
+    <div class="call-heading"><h2>요약</h2><span class="count">합성 요약</span></div>
+    <p>{{ row.summary.text }}</p>
+    <div class="call-links">
+      {% for segment_id in row.summary.segment_ids %}
+      {% set segment = result.segments[segment_id - 1] %}
+      <a class="button secondary" href="{{ source }}#segment-{{ segment_id }}">근거 보기 · {{ timecode(segment.start) }}–{{ timecode(segment.end) }}</a>
+      {% endfor %}
+    </div>
+  </section>
+  {% else %}
+  <section class="card">
+    <h2>{{ '요약' if result else '요약 및 전사' }}</h2>
+    {% if row.transcript_unavailable %}
+    <p class="hint">전사 결과를 확인할 수 없습니다.</p>
+    {% elif result %}
+    <p class="hint">아직 표시할 요약이 없습니다.</p>
+    {% else %}
+    <p class="hint">전사 결과가 아직 없습니다.</p>
+    {% endif %}
+    {% if not result %}<a class="button secondary standalone" href="/">통화 목록 보기</a>{% endif %}
+  </section>
+  {% endif %}
+{% endif %}
+
 {% if result %}
-{% if row.summary %}
-<h2>합성 요약</h2>
-<p>{{ row.summary.text }}</p>
-<ul>
-{% for segment_id in row.summary.segment_ids %}
-<li><a href="/recordings/{{ row.id }}/transcripts/{{ artifact.id }}#segment-{{ segment_id }}">요약 근거 {{ segment_id }}</a></li>
-{% endfor %}
-</ul>
+<section class="card call-transcript{% if pinned %} call-pinned{% endif %}">
+  <div class="call-heading">
+    <h2>{% if pinned %}<span class="default-transcript-label">전사 구간</span><span class="target-label">선택한 근거</span>{% else %}전사{% endif %}</h2>
+    <span class="count">합성 전사</span>
+  </div>
+  {% if result.schema_version == 2 %}
+    {% for segment in result.segments %}
+    <article class="call-segment" id="segment-{{ segment.segment_id }}" tabindex="-1">
+      <h3>{{ timecode(segment.start) }}–{{ timecode(segment.end) }}</h3>
+      <p>“{{ segment.text }}”</p>
+      <div class="call-links">
+        {% if audio_available and segment.start < segment.end %}
+        <a class="button secondary" href="{{ source }}/audio/{{ segment.segment_id }}">구간 원음 재생</a>
+        {% endif %}
+        <a class="button secondary" href="{{ source }}#segment-{{ segment.segment_id }}">근거 링크</a>
+      </div>
+    </article>
+    {% else %}<p class="hint">전사 구간이 없는 합성 결과입니다.</p>{% endfor %}
+  {% else %}
+  <p class="hint">시간 구간이 없는 합성 결과</p><p>{{ result.text }}</p>
+  {% endif %}
+</section>
 {% endif %}
-<h2>합성 전사</h2><p>서버 기능 검증용 가상 결과입니다.</p>
-<p>전사 버전 {{ artifact.version }} · {{ artifact.id }}</p>
-{% if result.schema_version == 2 %}
-{% for segment in result.segments %}
-<article id="segment-{{ segment.segment_id }}">
-<h3>구간 {{ segment.segment_id }} · {{ segment.start }} ~ {{ segment.end }}초</h3>
-<p>{{ segment.text }}</p>
-<a href="/recordings/{{ row.id }}/transcripts/{{ artifact.id }}#segment-{{ segment.segment_id }}">이 근거 링크</a>
-{% if audio_available and segment.start < segment.end %}
- · <a href="/recordings/{{ row.id }}/transcripts/{{ artifact.id }}/audio/{{ segment.segment_id }}">해당 원음 구간 열기</a>
-{% endif %}</article>
-{% else %}<p>전사 구간이 없는 합성 결과입니다.</p>{% endfor %}
-{% else %}<p>시간 구간이 없는 합성 결과</p><p>{{ result.text }}</p>{% endif %}
-{% else %}<p>전사 결과가 아직 없습니다.</p>{% endif %}</html>
+
+{% if not pinned and not editable %}
+<section class="card">
+  <div class="call-heading">
+    <h2>일정 후보</h2>
+    {% if candidates and candidates[0].status in ('NEEDS_CONFIRMATION', 'AWAITING_APPROVAL') %}
+    <span class="count schedule-pending">확인 필요</span>
+    {% endif %}
+  </div>
+  {% if candidates %}
+  <p class="hint">{{ candidates[0].title }}{% if candidates[0].start_at %} · {{ call_date(candidates[0].start_at, call_timezone) }}{% endif %}
+    {%- if candidates|length > 1 %} 외 {{ candidates|length - 1 }}건{% endif %}</p>
+  {% else %}<p class="hint">표시할 일정 후보가 없습니다.</p>{% endif %}
+  <a class="button secondary standalone" href="{{ recording_url }}/schedule">일정 후보 검토</a>
+</section>
+{% if row.classification_status == 'BUSINESS_APPROVED' %}
+<section class="card">
+  <h2>할 일 후보</h2>
+  <a class="button secondary standalone" href="{{ recording_url }}/task-candidates">할 일 후보 검토</a>
+</section>
+{% endif %}
+<details class="hint">
+  <summary>통화 분류 관리</summary>
+  <form class="fields" method="post" action="{{ recording_url }}/classify">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p>사적으로 지정하면 서버의 관리 사본을 삭제합니다.</p>
+    <button class="danger standalone" name="decision" value="PRIVATE_EXCLUDED">사적 통화로 변경</button>
+  </form>
+</details>
+{% endif %}
+{% endblock %}

@@ -1,49 +1,74 @@
-<!doctype html><html lang="ko"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>CallOps 일정 후보 검토</title>
-<a href="/recordings/{{ recording.id }}">통화 상세</a> · <a href="/schedules">일정 목록</a>
-<h1>{{ recording.counterparty or '상대 미확인' }} 일정 후보</h1>
-<p>합성 분석 결과입니다. 승인 기록은 CallOps에 저장됩니다.</p>
-{% if error %}<p role="alert">{{ error }}</p>{% endif %}
-{% set labels = {'NEEDS_CONFIRMATION': '확인 필요', 'AWAITING_APPROVAL': '승인 대기', 'APPROVED': '승인됨', 'REJECTED': '거절됨'} %}
-{% macro form_fields(candidate) %}
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="revision" value="{{ candidate.revision }}">
-<input type="hidden" name="status" value="{{ candidate.status }}">
-{% endmacro %}
-{% for candidate in candidates %}
-{% set start = candidate.start_at.astimezone(call_timezone).isoformat(timespec='seconds')[:19] if candidate.start_at else '' %}
-{% set end = candidate.end_at.astimezone(call_timezone).isoformat(timespec='seconds')[:19] if candidate.end_at else '' %}
-<article id="candidate-{{ candidate.id }}">
-<h2>{{ candidate.title }}</h2>
-<p>{{ labels[candidate.status] }}</p>
-<p>저장된 시각 (한국 시간) · {{ start|replace('T', ' ') or '시작 미확인' }} ~ {{ end|replace('T', ' ') or '종료 미확인' }}</p>
-{% if candidate.time_hint %}<p>분석 시각 표현 · {{ candidate.time_hint }}</p>{% endif %}
-<ul aria-label="전사 근거">
-{% for segment in candidate.segment_ids %}
-<li><a href="/recordings/{{ recording.id }}/transcripts/{{ candidate.transcript_id }}#segment-{{ segment }}">근거 구간 {{ segment }}</a></li>
-{% endfor %}
-</ul>
-{% set target = '/recordings/' ~ recording.id ~ '/schedule/' ~ candidate.id %}
-<form method="post" action="{{ target }}">
-{{ form_fields(candidate) }}
-<fieldset><legend>일정 수정</legend>
-<label>제목 <input name="title" value="{{ candidate.title }}" maxlength="160" required></label>
-<label>시작 (한국 시간) <input name="start" type="datetime-local" step="1" value="{{ start }}"></label>
-<label>종료 (한국 시간) <input name="end" type="datetime-local" step="1" value="{{ end }}"></label>
-<button name="action" value="edit">수정 저장</button>
-</fieldset></form>
-{% if candidate.status in ('AWAITING_APPROVAL', 'NEEDS_CONFIRMATION') %}
-<form method="post" action="{{ target }}">
-{{ form_fields(candidate) }}
-{% if candidate.status == 'AWAITING_APPROVAL' %}
-{% if candidate.start_at <= now %}
-<label><input type="checkbox" name="confirm_past" value="yes"> 이미 시작 시각이 지났습니다. 확인했습니다.</label>
-{% endif %}
-<button name="action" value="approve">저장된 일정 승인</button>
-{% else %}<p>시작과 종료를 저장하면 승인할 수 있습니다.</p>{% endif %}
-<button name="action" value="reject">거절</button>
-</form>
-{% endif %}
-</article>
-{% else %}<p>검토할 일정 후보가 없습니다.</p>{% endfor %}
-</html>
+{% extends "layout.html" %}
+{% set active_nav = 'calls' %}
+{% set main_class = 'schedule-review' %}
+{% set recording_url = '/recordings/' ~ recording.id %}
+{% set review_url = recording_url ~ '/schedule' %}
+{% set edit_id = request.query_params.get('edit') %}
+{% set labels = {'NEEDS_CONFIRMATION': '확인 필요', 'APPROVED': '승인됨', 'REJECTED': '거절됨'} %}
+{% block title %}일정 후보 검토{% endblock %}
+{% block content %}
+  <a class="back" href="{{ recording_url }}"><img src="/task-assets/back.svg" width="15" height="15" alt="">통화 상세</a>
+  <div class="review-heading">
+    <h1>일정 후보 검토</h1>
+    <p class="hint">{{ recording.counterparty or '상대 미확인' }} · 합성 전사</p>
+  </div>
+  {% if error %}<p class="notice" role="alert">{{ error }}</p>{% endif %}
+  {% for candidate in candidates %}
+    {% set anchor = 'candidate-' ~ candidate.id %}
+    {% set editing = edit_id == candidate.id|string %}
+    {% set target = review_url ~ '/' ~ candidate.id %}
+    <form id="{{ anchor }}" class="card review-card" method="post"
+          action="{{ target }}{% if editing %}?edit={{ candidate.id }}{% endif %}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="revision" value="{{ candidate.revision }}">
+      <input type="hidden" name="status" value="{{ candidate.status }}">
+      <div class="schedule-heading">
+        <label for="{{ anchor }}-title">제목</label>
+        {% if candidate.status in labels %}<span class="count">{{ labels[candidate.status] }}</span>{% endif %}
+        {% if not editing %}
+          <a class="review-edit" href="{{ review_url }}?edit={{ candidate.id }}#{{ anchor }}"
+             aria-label="{{ candidate.title }} 수정">수정</a>
+        {% endif %}
+      </div>
+      <input id="{{ anchor }}-title" value="{{ candidate.title }}"
+             {% if editing %}name="title" maxlength="160" required{% else %}disabled{% endif %}>
+      {% for name, label, at in [('start', '시작', candidate.start_at), ('end', '종료', candidate.end_at)] %}
+        {% set local = at.astimezone(call_timezone) if at else none %}
+        <label for="{{ anchor }}-{{ name }}">{{ label }} · 한국 시간</label>
+        {% if editing %}
+          <input id="{{ anchor }}-{{ name }}" name="{{ name }}" type="datetime-local" step="1"
+                 value="{{ local.isoformat(timespec='seconds')[:19] if local else '' }}">
+        {% else %}
+          <input id="{{ anchor }}-{{ name }}" disabled
+                 value="{{ local.strftime('%Y-%m-%d %H:%M:%S' if local.second else '%Y-%m-%d %H:%M') if local else '미확인' }}">
+        {% endif %}
+      {% endfor %}
+      {% if candidate.time_hint and (editing or candidate.status == 'NEEDS_CONFIRMATION') %}
+        <p class="hint">분석 시각 표현 · {{ candidate.time_hint }}</p>
+      {% endif %}
+      {% for segment in candidate.segment_ids %}
+        <a class="button secondary" href="{{ recording_url }}/transcripts/{{ candidate.transcript_id }}#segment-{{ segment }}">전사 근거 보기{% if candidate.segment_ids|length > 1 %} · 구간 {{ segment }}{% endif %}</a>
+      {% endfor %}
+      {% if editing %}
+        <div class="actions">
+          <a class="button secondary" href="{{ review_url }}#{{ anchor }}">취소</a>
+          <button class="primary" name="action" value="edit">수정 저장</button>
+        </div>
+      {% elif candidate.status in ('AWAITING_APPROVAL', 'NEEDS_CONFIRMATION') %}
+        {% if candidate.status == 'NEEDS_CONFIRMATION' %}
+          <p class="hint">시작과 종료를 저장하면 승인할 수 있습니다.</p>
+        {% elif candidate.start_at <= now %}
+          <label class="past-confirmation"><input type="checkbox" name="confirm_past" value="yes">이미 시작 시각이 지났습니다. 확인했습니다.</label>
+        {% endif %}
+        <div class="actions">
+          <button class="secondary" name="action" value="reject">거절</button>
+          {% if candidate.status == 'AWAITING_APPROVAL' %}
+            <button class="primary" name="action" value="approve">승인</button>
+          {% endif %}
+        </div>
+      {% endif %}
+    </form>
+  {% else %}
+    <p class="empty">검토할 일정 후보가 없습니다.</p>
+  {% endfor %}
+{% endblock %}

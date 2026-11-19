@@ -5,16 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{% endblock %} · CallOps</title>
   <link rel="stylesheet" href="/task-assets/tasks.css">
+  {% block head %}{% endblock %}
 </head>
 <body>
   <header class="app-header">
     <a href="/" class="wordmark"><span><img src="/task-assets/wave.svg" width="21" height="21" alt=""></span>CallOps</a>
+    {% block header_action %}{% endblock %}
   </header>
-  <main>
+  <main{% if main_class is defined %} class="{{ main_class }}"{% endif %}>
     {% block content %}{% endblock %}
   </main>
   <nav class="app-nav" aria-label="주 메뉴">
-  {% for url, icon, label in [('/', 'calls', '통화'), ('/questions', 'search', '전사 검색'),
+  {% for url, icon, label in [('/', 'calls', '통화'), ('/search', 'search', '전사 검색'),
                               ('/schedules', 'calendar', '일정'), ('/tasks', 'tasks', '할 일')] %}
     <a href="{{ url }}"{% if icon == active_nav|default('calendar') %} aria-current="page"{% endif %}>
       <img src="/task-assets/{{ icon }}.svg" width="19" height="19" alt="">{{ label }}

@@ -1,4 +1,4 @@
-"""Manage directly entered tasks through the owner web and JSON routes."""
+"""Manage directly entered and call-approved tasks."""
 
 import re
 from pathlib import Path
@@ -15,6 +15,8 @@ from .schedule.service import checked_text, event_time
 
 
 TASK_FIELDS = 'id,title,due_at,status,revision,completed_at'
+TASK_TRANSITIONS = {'complete': (('OPEN',), 'DONE'), 'cancel': (('OPEN',), 'CANCELLED'),
+                    'reopen': (('DONE', 'CANCELLED'), 'OPEN')}
 TEMPLATES = Jinja2Templates(directory=Path(__file__).with_name('task_templates'))
 WEEKDAYS = '월화수목금토일'
 INVALID_FIELDS = '제목은 1~160자이며 기한은 올바른 날짜와 시간으로 입력해 주세요.'
@@ -43,7 +45,8 @@ def create_task(service, form):
         if created is not None:
             return created, True
         existing = conn.execute(f'''SELECT {TASK_FIELDS} FROM callops.tasks
-            WHERE request_id=%s AND deleted_at IS NULL AND revision=1''', (request_id,)).fetchone()
+            WHERE request_id=%s AND recording_id IS NULL AND deleted_at IS NULL AND revision=1''',
+                                (request_id,)).fetchone()
         if existing is not None and (existing['title'], existing['due_at']) == fields:
             return existing, False
         raise Conflict('TASK_REQUEST_CONFLICT')
@@ -51,7 +54,7 @@ def create_task(service, form):
 
 def change_task(service, task_id, form):
     action, revision = form.get('action'), form.get('revision', '')
-    if action not in ('edit', 'complete', 'delete') or not re.fullmatch(r'[1-9][0-9]{0,9}', revision):
+    if action not in ('edit', 'delete', *TASK_TRANSITIONS) or not re.fullmatch(r'[1-9][0-9]{0,9}', revision):
         raise Conflict('INVALID_TASK_ACTION')
     revision = int(revision)
     fields = task_fields(form) if action == 'edit' else None
@@ -67,11 +70,14 @@ def change_task(service, task_id, form):
         if action == 'edit':
             row = conn.execute(f'''UPDATE callops.tasks SET title=%s,due_at=%s,revision=revision+1
                 WHERE id=%s RETURNING {TASK_FIELDS}''', (*fields, task_id)).fetchone()
-        elif action == 'complete':
-            if current['status'] != 'OPEN':
-                raise Conflict('TASK_ALREADY_COMPLETED')
-            row = conn.execute(f'''UPDATE callops.tasks SET status='DONE',completed_at=%s,revision=revision+1
-                WHERE id=%s RETURNING {TASK_FIELDS}''', (service.clock(), task_id)).fetchone()
+        elif action in TASK_TRANSITIONS:
+            allowed, target = TASK_TRANSITIONS[action]
+            if current['status'] not in allowed:
+                raise Conflict('TASK_ALREADY_COMPLETED' if action == 'complete' and current['status'] == 'DONE'
+                               else 'INVALID_TASK_TRANSITION')
+            row = conn.execute(f'''UPDATE callops.tasks SET status=%s,completed_at=%s,revision=revision+1
+                WHERE id=%s RETURNING {TASK_FIELDS}''',
+                               (target, service.clock() if target == 'DONE' else None, task_id)).fetchone()
         else:
             # Preserve the request ID so a delayed create cannot restore the task.
             conn.execute('''UPDATE callops.tasks SET title=NULL,due_at=NULL,status=NULL,completed_at=NULL,
@@ -80,10 +86,19 @@ def change_task(service, task_id, form):
     return row
 
 
-def list_tasks(service):
+def list_tasks(service, now):
     with service.transaction() as conn:
-        return conn.execute(f'''SELECT {TASK_FIELDS} FROM callops.tasks WHERE deleted_at IS NULL
-            ORDER BY status DESC,due_at NULLS LAST,id''').fetchall()
+        return conn.execute('''SELECT t.id,t.title,t.due_at,t.status,t.revision,t.completed_at,
+                t.recording_id,f.id AS transcript_id,c.segment_ids
+            FROM callops.tasks t
+            LEFT JOIN callops.recordings r ON r.id=t.recording_id
+            LEFT JOIN callops.task_candidates c ON c.id=t.id AND c.recording_id=t.recording_id
+                AND c.status='APPROVED' AND c.expires_at>%s
+            LEFT JOIN callops.artifacts f ON f.id=c.transcript_id AND f.recording_id=c.recording_id
+                AND f.available AND f.expires_at>%s
+            WHERE t.deleted_at IS NULL AND (t.recording_id IS NULL OR
+                (r.classification_status='BUSINESS_APPROVED' AND r.deletion_state='NONE'))
+            ORDER BY t.status DESC,t.due_at NULLS LAST,t.id''', (now, now)).fetchall()
 
 
 def due_label(value):
@@ -95,14 +110,16 @@ def due_label(value):
 
 
 def task_json(row):
-    return row | {'id': str(row['id']), 'due_at': row['due_at'].isoformat() if row['due_at'] else None,
-                  'completed_at': row['completed_at'].isoformat() if row['completed_at'] else None}
+    return {key: row[key] for key in TASK_FIELDS.split(',')} | {
+        'id': str(row['id']), 'due_at': row['due_at'].isoformat() if row['due_at'] else None,
+        'completed_at': row['completed_at'].isoformat() if row['completed_at'] else None,
+    }
 
 
 def routes(service):
     def list_api(request):
         return JSONResponse({'csrf': request.state.login['csrf'],
-                             'tasks': [task_json(row) for row in list_tasks(service)]})
+                             'tasks': [task_json(row) for row in list_tasks(service, service.clock())]})
 
     def create(request):
         row, created = create_task(service, request.state.form)
@@ -121,12 +138,20 @@ def routes(service):
         }, status_code=status_code)
 
     def render_list(request, form=None, error=None, status_code=200):
-        rows = list_tasks(service)
+        now = service.clock()
+        overdue_only = request.query_params.get('overdue') == '1'
+        rows = list_tasks(service, now)
+        for row in rows:
+            row['overdue'] = row['status'] == 'OPEN' and row['due_at'] is not None and row['due_at'] < now
+        if overdue_only:
+            rows = [row for row in rows if row['overdue']]
         if form is None:
             form = {'request_id': uuid4()}
         return render(request, 'list', status_code, form=form, error=error,
-                      open_tasks=[r for r in rows if r['status'] == 'OPEN'],
-                      done_tasks=[r for r in rows if r['status'] == 'DONE'])
+                      overdue_only=overdue_only,
+                      groups=[(label, [r for r in rows if r['status'] == status])
+                              for label, status in [('미완료', 'OPEN'), ('완료', 'DONE'), ('취소', 'CANCELLED')]
+                              if not overdue_only or status == 'OPEN'])
 
     def task_list(request):
         if request.method in ('GET', 'HEAD'):
@@ -155,7 +180,7 @@ def routes(service):
             form = {'title': row['title'], 'revision': row['revision'],
                     'due': due.astimezone(CALL_TIMEZONE).replace(tzinfo=None).isoformat(timespec='seconds') if due else ''}
             mode = 'delete' if request.query_params.get('delete') == '1' else 'edit'
-            return render(request, mode, task_id=task_id, form=form)
+            return render(request, mode, task_id=task_id, form=form, task_status=row['status'])
 
         form = request.state.form
         try:

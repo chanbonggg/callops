@@ -1,5 +1,8 @@
 """Authenticated browser and API routes for schedules."""
 
+from calendar import Calendar, SUNDAY, monthrange
+from collections import defaultdict
+from datetime import date, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -37,6 +40,48 @@ MANUAL_CONFLICTS = {
     'MANUAL_SCHEDULE_NOT_FOUND': '이 일정을 찾을 수 없습니다. 목록에서 확인해 주세요.',
     'INVALID_SCHEDULE_ACTION': '요청을 처리할 수 없습니다. 목록에서 일정을 다시 열어 주세요.',
 }
+WEEKDAYS = '월화수목금토일'
+
+
+def selected_date(request, now):
+    value = request.query_params.get('date', '')
+    try:
+        day = date.fromisoformat(value)
+        if day.isoformat() == value:
+            return day
+    except ValueError:
+        pass
+    return now.astimezone(CALL_TIMEZONE).date()
+
+
+def month_view(rows, selected):
+    year, month = selected.year, selected.month
+    first, last = selected.replace(day=1), selected.replace(day=monthrange(year, month)[1])
+    by_day = defaultdict(list)
+    for row in rows:
+        start = row['start_at'].astimezone(CALL_TIMEZONE)
+        end = row['end_at'].astimezone(CALL_TIMEZONE)
+        # An event ending at midnight does not occupy the new day.
+        last_day = (end - timedelta(microseconds=1)).date()
+        event = row | {'start': start, 'end': end}
+        for ordinal in range(max(first, start.date()).toordinal(), min(last, last_day).toordinal() + 1):
+            by_day[date.fromordinal(ordinal)].append(event)
+
+    cells = []
+    for y, m, d, weekday in Calendar(SUNDAY).itermonthdays4(year, month):
+        if not date.min.year <= y <= date.max.year:
+            cells.append(None)
+            continue
+        day = date(y, m, d)
+        cells.append({'day': day, 'weekday': WEEKDAYS[weekday], 'outside': day.month != month,
+                      'count': len(by_day.get(day, ()))})
+    return {
+        'cells': cells,
+        'previous': (first - timedelta(days=1)).replace(day=1) if first > date.min else None,
+        'next': last + timedelta(days=1) if last < date.max else None,
+        'weekday': WEEKDAYS[selected.weekday()],
+        'events': by_day[selected],
+    }
 
 
 def schedule_json(row):
@@ -74,9 +119,12 @@ def routes(service, owner):
         return RedirectResponse(f'/recordings/{recording_id}/schedule#candidate-{candidate_id}', status_code=303)
 
     def schedules(request, error=None):
+        now = service.clock()
+        selected = selected_date(request, now)
         return TEMPLATES.TemplateResponse(request, 'schedules.html', {
-            'rows': list_schedules(service), 'csrf': request.state.login['csrf'],
-            'now': service.clock(), 'call_timezone': CALL_TIMEZONE, 'error': error,
+            **month_view(list_schedules(service), selected),
+            'selected': selected, 'today': now.astimezone(CALL_TIMEZONE).date(),
+            'csrf': request.state.login['csrf'], 'now': now, 'error': error,
         }, status_code=409 if error else 200)
 
     def send(request):
@@ -87,7 +135,10 @@ def routes(service, owner):
             if message is None:
                 raise
             return schedules(request, message)
-        return RedirectResponse('/schedules', status_code=303)
+        destination = '/schedules'
+        if 'date' in request.query_params:
+            destination += f'?date={selected_date(request, service.clock())}'
+        return RedirectResponse(destination, status_code=303)
 
     def schedule_api(request):
         return JSONResponse({'csrf': request.state.login['csrf'],
@@ -117,13 +168,13 @@ def routes(service, owner):
             return manual_form(request, 'create', {'request_id': uuid4()})
         form = request.state.form
         try:
-            create_manual_schedule(service, form)
+            row, _ = create_manual_schedule(service, form)
         except Conflict as error:
             if str(error) == 'INVALID_ID':
                 return manual_form(request, 'create', form | {'request_id': uuid4()},
                                    '등록 요청을 다시 확인해 주세요.', 409)
             return manual_form_error(request, 'create', form, error)
-        return RedirectResponse('/schedules', status_code=303)
+        return RedirectResponse(f"/schedules?date={row['start_at'].astimezone(CALL_TIMEZONE).date()}", status_code=303)
 
     def manual_form_error(request, mode, form, error):
         if str(error) == 'INVALID_SCHEDULE_FIELDS':
@@ -148,10 +199,11 @@ def routes(service, owner):
             return manual_form(request, mode, form)
         form = request.state.form
         try:
-            change_manual_schedule(service, schedule_id, form | {'action': mode})
+            row = change_manual_schedule(service, schedule_id, form | {'action': mode})
         except Conflict as error:
             return manual_form_error(request, mode, form, error)
-        return RedirectResponse('/schedules', status_code=303)
+        destination = f"/schedules?date={row['start_at'].astimezone(CALL_TIMEZONE).date()}" if row else '/schedules'
+        return RedirectResponse(destination, status_code=303)
 
     return [Route('/recordings/{recording_id:uuid}/schedule', page),
             Route('/recordings/{recording_id:uuid}/schedule/{candidate_id:uuid}', submit, methods=['POST']),

@@ -1,9 +1,9 @@
 """Extractive question preview over approved transcripts."""
 
 import re
-from datetime import timedelta
 from unicodedata import normalize
 
+from ..calls.service import audio_expired
 from ..common import Conflict
 from .retrieval import retrieve_evidence
 
@@ -51,7 +51,7 @@ def answer_question(service, q, counterparty='', from_date='', to_date=''):
         try:
             row, _, _ = service.transcript(match['recording_id'], match['artifact_id'])
             if (segment['end'] > segment['start']
-                    and row['received_at'] + timedelta(days=30) > service.clock()
+                    and not audio_expired(row, service.clock())
                     and service.audio_path(row).is_file()):
                 transcript_url = segment['source_url'].split('#', 1)[0]
                 segment['audio_url'] = f"{transcript_url}/audio/{segment['segment_id']}"

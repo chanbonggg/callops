@@ -40,7 +40,7 @@ class FakeWorker:
                 path.unlink(missing_ok=True)
             self.call('POST', '/worker/cleanup', json={**item, 'stopped': True, 'removed': True})
 
-    def once(self, *, transcript_text='synthetic test result', events=None, summary=None):
+    def once(self, *, transcript_text='synthetic test result', events=None, summary=None, tasks=None):
         self.clean()
         job = self.call('POST', '/worker/claim').json()
         if job is None:
@@ -60,10 +60,12 @@ class FakeWorker:
             duration = audio_duration(io.BytesIO(data))
             result.update(schema_version=2, segments=[{'segment_id': 1, 'start': 0, 'end': duration,
                                                        'text': transcript_text}])
-        elif events is not None or summary is not None:
+        elif events is not None or summary is not None or tasks is not None:
             result.update(schema_version=2, events=[] if events is None else events)
             if summary is not None:
                 result['summary'] = summary
+            if tasks is not None:
+                result['tasks'] = tasks
         else:
             result['text'] = 'synthetic test result'
         payload = json.dumps(result, sort_keys=True).encode()

@@ -1,11 +1,12 @@
 {% extends "layout.html" %}
+{% from "call_fields.html" import search_modes %}
 {% block title %}통화에 질문하기{% endblock %}
 {% block content %}
 <div>
   <h1>통화에 질문하기</h1>
   <p class="hint">거래처나 날짜가 기억나는 만큼만 질문하세요.</p>
-  <a class="hint" href="/search">전사 키워드 검색 →</a>
 </div>
+{{ search_modes('question') }}
 <form class="card" method="post" action="/questions">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label for="question">질문</label>

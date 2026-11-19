@@ -12,7 +12,7 @@
 현재 서버는 Starlette·Uvicorn과 PostgreSQL을 사용하는 모듈러 모놀리스다. 앱 조립과 공통 HTTP 설정은 [web.py](src/callops/web.py), 마이그레이션과 DB 시작 검사는 [db.py](src/callops/db.py)에 있다.
 
 - 웹 요청은 [인증](src/callops/auth/AGENTS.md), [통화](src/callops/calls/AGENTS.md), [전사 검색](src/callops/search/AGENTS.md), [일정](src/callops/schedule/AGENTS.md) 지침을 따른다.
-- 직접 입력 할 일은 [웹 화면 계약](docs/p2-p3-server.md#직접-입력-할-일-화면)과 [화면·API 공통 구현](src/callops/tasks.py)에서 시작한다.
+- 할 일 목록·편집은 [화면·API 공통 구현](src/callops/tasks.py), 통화에서 나온 후보의 저장·승인은 [후보 구현](src/callops/task_candidates.py)과 [후보 검토 계약](docs/p2-p3-server.md#통화에서-나온-할-일-후보-검토)에서 시작한다.
 - 서버 작업 큐는 [처리](src/callops/processing/AGENTS.md), 로컬 모델 실험은 [데스크톱 AI](ai-worker/AGENTS.md)에서 시작한다.
 
 ## 개발 루프

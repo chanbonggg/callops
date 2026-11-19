@@ -1,0 +1,74 @@
+{% extends "layout.html" %}
+{% set recording_url = '/recordings/' ~ recording_id %}
+{% set labels = {'OPEN': '미완료', 'DONE': '완료', 'CANCELLED': '취소'} %}
+{% block title %}할 일 후보 검토{% endblock %}
+{% block content %}
+<a class="back" href="{{ recording_url }}">‹ 통화 상세</a>
+<div>
+  <h1>할 일 후보 검토</h1>
+  {% if recording and recording.counterparty %}<p class="hint">{{ recording.counterparty }}</p>{% endif %}
+</div>
+{% if error %}
+<p class="error" role="alert" data-error="{{ error }}">
+  {{ {
+    'INVALID_TASK_FIELDS': '제목과 기한을 확인해 주세요.',
+    'STALE_TASK_CANDIDATE': '후보나 승인 상태가 바뀌었어요. 아래 최신 내용을 확인해 주세요.',
+    'TASK_LINK_UNAVAILABLE': '선택한 할 일에 연결할 수 없어요.',
+    'TASK_CANDIDATE_UNAVAILABLE': '검토할 수 없는 후보입니다.',
+    'INPUT_MISSING': '전사 근거를 찾을 수 없어요.',
+    'INPUT_CORRUPT': '전사 근거를 읽을 수 없어요.',
+    'TRANSCRIPT_UNAVAILABLE': '전사 근거가 만료됐어요.'
+  }.get(error, '요청을 처리할 수 없어요.') }}
+</p>
+{% endif %}
+{% for candidate in candidates %}
+<article class="card" id="candidate-{{ candidate.id }}">
+  <h2>{{ candidate.title }}</h2>
+  <div class="call-links">
+  {% for id in candidate.segment_ids %}
+    <a class="button secondary" href="{{ recording_url }}/transcripts/{{ candidate.transcript_id }}#segment-{{ id }}">전사 근거 {{ id }}</a>
+  {% endfor %}
+  </div>
+  {% if candidate.status == 'PENDING' %}
+  {% set compare = candidate.pipeline_version > 1 and tasks %}
+  <form class="fields" method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="candidate_id" value="{{ candidate.id }}">
+    <input type="hidden" name="revision" value="{{ candidate.revision }}">
+    <input type="hidden" name="output_version" value="{{ recording.output_decision_version }}">
+    <label>제목 <input name="title" value="{{ candidate.title }}" required maxlength="160"></label>
+    <label>기한 <small>선택 · 한국 시간</small>
+      <input name="due" type="datetime-local" step="1" value="{{ candidate.due_at.astimezone(call_timezone).strftime('%Y-%m-%dT%H:%M:%S') if candidate.due_at else '' }}">
+    </label>
+    {% if compare %}
+    <label>기존 할 일
+      <select name="task_id">
+        <option value="">연결할 할 일 선택</option>
+        {% for task in tasks %}
+        {% if not task.deleted_at %}<option value="{{ task.id }}">{{ task.title }} · {{ labels[task.status] }}</option>{% endif %}
+        {% endfor %}
+      </select>
+    </label>
+    {% if tasks|rejectattr('deleted_at')|list %}
+    <button class="secondary" name="action" value="link" formnovalidate>기존 할 일에 연결</button>
+    {% endif %}
+    {% if tasks|selectattr('deleted_at')|list %}<p class="hint">이 통화에 삭제된 할 일이 있습니다.</p>{% endif %}
+    {% endif %}
+    <div class="actions">
+      <button class="secondary" name="action" value="reject" formnovalidate>거절</button>
+      <button class="primary" name="action" value="approve">{{ '별도 할 일로 승인' if compare else '승인' }}</button>
+    </div>
+  </form>
+  {% elif candidate.status == 'REJECTED' %}
+  <p class="hint">거절됨</p>
+  {% else %}
+  <p class="hint">{{ '기존 할 일에 연결됨 · 내용 반영 없음' if candidate.status == 'LINKED' else '승인됨' }}</p>
+  {% if tasks|selectattr('id', 'equalto', candidate.task_id)|rejectattr('deleted_at')|list %}
+  <a class="button secondary standalone" href="/tasks/{{ candidate.task_id }}">할 일 보기</a>
+  {% endif %}
+  {% endif %}
+</article>
+{% else %}
+{% if not error %}<p class="hint">검토할 할 일 후보가 없어요.</p>{% endif %}
+{% endfor %}
+{% endblock %}

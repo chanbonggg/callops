@@ -37,7 +37,10 @@
         <button class="primary">추가</button>
       </div>
     </form>
-    {% for heading, tasks in [('미완료', open_tasks), ('완료', done_tasks)] %}
+    <a class="button secondary standalone" href="{{ '/tasks' if overdue_only else '/tasks?overdue=1' }}">
+      {{ '전체 할 일 보기' if overdue_only else '기한 초과만 보기' }}
+    </a>
+    {% for heading, tasks in groups %}
     <section class="task-group">
       <h2>{{ heading }} <span class="count">{{ tasks|length }}</span></h2>
       <ul>
@@ -47,15 +50,27 @@
             <span class="status-icon" aria-hidden="true">
               {% if task.status == 'DONE' %}<img src="/task-assets/check.svg" width="15" height="15" alt="">{% endif %}
             </span>
-            <div><strong>{{ task.title }}</strong><p class="hint">{{ due_label(task.due_at) }}</p></div>
+            <div>
+              <strong>{{ task.title }}</strong>
+              <p class="hint">{% if task.overdue %}<span class="error">기한 초과</span> · {% endif %}{{ due_label(task.due_at) }}</p>
+              {% if task.transcript_id %}
+                {% for segment in task.segment_ids %}
+                <a href="/recordings/{{ task.recording_id }}/transcripts/{{ task.transcript_id }}#segment-{{ segment }}">전사 근거 {{ segment }}</a>
+                {% endfor %}
+              {% elif task.recording_id %}
+                <p class="hint">근거 만료 또는 조회 불가</p>
+              {% endif %}
+            </div>
           </div>
-          {% if task.status == 'OPEN' %}
           <form method="post" action="/tasks/{{ task.id }}">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="revision" value="{{ task.revision }}">
+            {% if task.status == 'OPEN' %}
             <button class="quiet" name="action" value="complete" aria-label="{{ task.title }} 완료">완료</button>
+            {% else %}
+            <button class="quiet" name="action" value="reopen" aria-label="{{ task.title }} 재열기">재열기</button>
+            {% endif %}
           </form>
-          {% endif %}
           <a class="button secondary" href="/tasks/{{ task.id }}" aria-label="{{ task.title }} 수정">수정</a>
         </li>
       {% else %}
@@ -82,6 +97,13 @@
         <button class="primary" name="action" value="edit">저장</button>
       </div>
     </form>
+    {% if task_status == 'OPEN' %}
+    <form method="post" action="/tasks/{{ task_id }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="revision" value="{{ form.revision }}">
+      <button class="secondary" name="action" value="cancel">할 일 취소</button>
+    </form>
+    {% endif %}
     <a class="button danger standalone" href="/tasks/{{ task_id }}?delete=1">할 일 삭제</a>
   {% elif mode == 'delete' %}
     <h1>할 일 삭제</h1>

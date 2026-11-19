@@ -89,6 +89,10 @@ class DatabaseTests(unittest.TestCase):
 
     def check_migrated_schedules(self, conn, fixture, other_recording):
         recording, artifact, other_artifact, analysis, attempt, candidate, schedule, manual, orphan = fixture
+        self.assertEqual(conn.execute('SELECT audio_deletion_state FROM callops.recordings WHERE id=%s',
+                                      (recording,)).fetchone(), ('NONE',))
+        self.assertEqual(conn.execute('SELECT available,deletion_state FROM callops.artifacts WHERE id=%s',
+                                      (artifact,)).fetchone(), (True, 'NONE'))
         self.assertEqual(conn.execute('SELECT source,title FROM callops.schedules WHERE id=%s', (manual,)).fetchone(),
                          ('manual', 'manual'))
         self.assertEqual(conn.execute('SELECT title,approved_candidate_id,approved_revision FROM callops.schedules WHERE id=%s',

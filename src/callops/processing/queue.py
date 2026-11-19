@@ -5,8 +5,10 @@ import os
 from datetime import datetime, timedelta
 from uuid import uuid4
 
+from ..calls.service import audio_expired, audio_expires_at
 from ..common import Conflict, digest, identifier, valid_hash
 from ..schedule.service import store_candidates, validated_events
+from ..task_candidates import store_task_candidates, validated_tasks
 from .transcript import validate_result
 
 
@@ -16,20 +18,26 @@ class Queue:
     def __init__(self, service):
         self.service = service
 
-    def input_info(self, conn, job, recording):
+    def input_info(self, conn, job, recording, now):
         if job['stage'] == 'STT':
+            if audio_expired(recording, now):
+                raise Conflict('INPUT_EXPIRED')
             return (self.service.audio_path(recording), recording['sha256'],
-                    recording['received_at'] + timedelta(days=30), None, 1)
+                    audio_expires_at(recording), None, 1)
         artifact = conn.execute('SELECT * FROM callops.artifacts WHERE id=%s', (job['input_artifact_id'],)).fetchone()
-        if not artifact or not artifact['available']:
+        if artifact is None:
+            raise Conflict('INPUT_MISSING')
+        if artifact['deletion_state'] != 'NONE' or artifact['expires_at'] <= now:
+            raise Conflict('INPUT_EXPIRED')
+        if not artifact['available']:
             raise Conflict('INPUT_MISSING')
         return (self.service.safe_path('artifacts', str(artifact['id'])), artifact['sha256'],
                 artifact['expires_at'], artifact['id'], artifact['version'])
 
     def reap(self):
-        self.service.maintain()
+        # Apply input expiry and lease timeouts at the same cutoff.
+        now = self.service.maintain()
         with self.service.transaction() as conn:
-            now = self.service.clock()
             rows = conn.execute('''SELECT j.*,a.lease_until,a.preparation_deadline,a.execution_deadline,a.upload_deadline
                 FROM callops.jobs j JOIN callops.attempts a ON a.id=j.active_attempt
                 WHERE j.status IN ('PREPARING','RUNNING','UPLOADING') FOR UPDATE OF j,a''').fetchall()
@@ -64,13 +72,12 @@ class Queue:
             for job in rows:
                 recording = self.service.recording(conn, job['recording_id'])
                 try:
-                    path, sha, expires, artifact, version = self.input_info(conn, job, recording)
-                    if expires <= now:
-                        raise Conflict('INPUT_EXPIRED')
+                    path, sha, expires, artifact, version = self.input_info(conn, job, recording, now)
                     if not path.is_file():
                         raise Conflict('INPUT_MISSING')
                 except Conflict as error:
-                    conn.execute("UPDATE callops.jobs SET status='FAILED_MANUAL',error_code=%s WHERE id=%s", (str(error), job['id']))
+                    status = 'CANCELLED' if str(error) == 'INPUT_EXPIRED' else 'FAILED_MANUAL'
+                    conn.execute('UPDATE callops.jobs SET status=%s,error_code=%s WHERE id=%s', (status, str(error), job['id']))
                     continue
                 attempt, token = uuid4(), uuid4()
                 conn.execute('''INSERT INTO callops.attempts
@@ -105,9 +112,7 @@ class Queue:
         recording = self.service.recording(conn, job['recording_id'])
         if recording['classification_status'] != 'BUSINESS_APPROVED' or recording['deletion_state'] != 'NONE':
             raise Conflict('APPROVAL_REVOKED')
-        info = self.input_info(conn, job, recording)
-        if info[2] <= now:
-            raise Conflict('INPUT_EXPIRED')
+        info = self.input_info(conn, job, recording, now)
         deadline = attempt[{'PREPARING': 'preparation_deadline', 'RUNNING': 'execution_deadline', 'UPLOADING': 'upload_deadline'}[job['status']]]
         if deadline <= now:
             raise Conflict('DEADLINE_EXCEEDED')
@@ -116,13 +121,15 @@ class Queue:
     def input(self, worker, job_id, token):
         with self.service.transaction() as conn:
             job, attempt = self.lookup(conn, worker, job_id, token)
-            path, sha, _, _, _ = self.active(conn, job, attempt)
+            path, sha, expires, _, _ = self.active(conn, job, attempt)
             try:
                 data = path.read_bytes()
             except FileNotFoundError:
                 raise Conflict('INPUT_MISSING') from None
             if digest(data) != sha:
                 raise Conflict('INPUT_CORRUPT')
+            if expires <= self.service.clock():
+                raise Conflict('INPUT_EXPIRED')
             return data
 
     def report(self, worker, job_id, token, action, body):
@@ -195,7 +202,7 @@ class Queue:
             _, input_sha, input_expires_at, artifact, version = self.active(conn, job, attempt)
             if job['status'] != 'UPLOADING':
                 raise Conflict('INVALID_STATE')
-            candidates = []
+            candidates, tasks = [], []
             try:
                 recording = self.service.recording(conn, job['recording_id'])
                 payload = validate_result(json.loads(data), job['stage'], recording['duration_seconds'])
@@ -213,6 +220,8 @@ class Queue:
                         raise ValueError('Invalid transcript source')
                     transcript = self.service.read_transcript_artifact(source, recording['duration_seconds'])
                     candidates = validated_events(payload['events'], transcript)
+                    if 'tasks' in payload:
+                        tasks = validated_tasks(payload['tasks'], transcript)
                     if 'summary' in payload and (
                         transcript['schema_version'] != 2
                         or max(payload['summary']['segment_ids']) > len(transcript['segments'])
@@ -238,6 +247,8 @@ class Queue:
                     VALUES (%s,%s,'ANALYSIS',%s,%s,%s)''', (uuid4(), job['recording_id'], artifact_id, job['pipeline_version'], self.service.clock()))
             if candidates:
                 store_candidates(conn, job, input_expires_at, candidates)
+            if tasks:
+                store_task_candidates(conn, job, input_expires_at, tasks)
             try:
                 self.active(conn, job, attempt)
             except Conflict:

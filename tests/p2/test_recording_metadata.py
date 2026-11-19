@@ -14,7 +14,10 @@ class RecordingMetadataTests(ProductCase):
         self.assertEqual(self.save(recording, '').status_code, 401)
         csrf = self.login()
         self.assertEqual(self.save(recording, 'wrong').status_code, 403)
-        self.assertEqual(self.save(recording, csrf).status_code, 302)
+        saved = self.save(recording, csrf)
+        self.assertEqual(saved.status_code, 302)
+        detail_url = '/recordings/' + recording
+        self.assertEqual(saved.headers['location'], detail_url)
         row = self.row(recording)
         self.assertEqual(row['counterparty'], '가상 거래처 A')
         self.assertEqual(row['call_started_at'], datetime(2029, 12, 31, 14, 30, tzinfo=timezone.utc))
@@ -22,7 +25,17 @@ class RecordingMetadataTests(ProductCase):
         self.assertTrue(row['call_time_trusted'])
         self.assertEqual(row['classification_status'], 'PENDING')
         self.assertEqual(self.jobs(recording), [])
-        self.assertIn('2029-12-31T23:30', self.http('GET', '/').text)
+        listing = self.http('GET', '/').text
+        self.assertIn(f'href="{detail_url}">분류하기', listing)
+        self.assertNotIn(f'action="{detail_url}/metadata"', listing)
+        detail = self.http('GET', detail_url).text
+        self.assertIn('2029-12-31T23:30', detail)
+        self.assertIn(f'action="{detail_url}/metadata"', detail)
+        self.assertIn(f'src="{detail_url}/audio"', detail)
+        approved = self.http('POST', detail_url + '/classify',
+                             data={'csrf': csrf, 'decision': 'BUSINESS_APPROVED'})
+        self.assertEqual(approved.headers['location'], detail_url)
+        self.assertNotIn(f'action="{detail_url}/metadata"', self.http('GET', detail_url).text)
 
     def test_empty_metadata_and_invalid_values_preserve_existing_information(self):
         recording = self.ingest()

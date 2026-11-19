@@ -41,7 +41,7 @@ def validate_result(payload, stage, duration):
         validate_segments(payload['segments'], duration)
     elif payload['schema_version'] == 2 and stage == 'ANALYSIS':
         fields = ENVELOPE_FIELDS | {'events'}
-        if set(payload) not in (fields, fields | {'summary'}):
+        if not fields <= payload.keys() <= fields | {'summary', 'tasks'}:
             raise ValueError('Invalid synthetic analysis result')
         if 'summary' in payload:
             summary = payload['summary']

@@ -1,0 +1,26 @@
+{% macro date_range(fields) %}
+<div class="actions date-range">
+  <label>시작일 <input type="date" name="from_date" value="{{ fields.from_date }}"></label>
+  <label>종료일 <input type="date" name="to_date" value="{{ fields.to_date }}"></label>
+</div>
+{% endmacro %}
+
+{% macro call_date(value, timezone) -%}
+  {%- if value -%}
+  {%- set local = value.astimezone(timezone) -%}
+  {{ local.month }}월 {{ local.day }}일 {{ ['월','화','수','목','금','토','일'][local.weekday()] }} · {{ local.strftime('%H:%M') }}
+  {%- else -%}통화 시각 미확인{%- endif -%}
+{%- endmacro %}
+
+{% macro timecode(seconds, pad_minutes=true) -%}
+  {%- set milliseconds = ((seconds * 1000)|round|int) if pad_minutes else (seconds|int) * 1000 -%}
+  {{ ('%02d:%02d' if pad_minutes else '%d:%02d')|format(milliseconds // 60000, milliseconds // 1000 % 60) }}
+  {%- if milliseconds % 1000 -%}.{{ ('%03d'|format(milliseconds % 1000)).rstrip('0') }}{%- endif -%}
+{%- endmacro %}
+
+{% macro search_modes(current) %}
+<nav class="actions search-modes" aria-label="전사 검색 방식">
+  <a class="button {{ 'quiet' if current == 'keyword' else 'secondary' }}" href="/search"{% if current == 'keyword' %} aria-current="page"{% endif %}>키워드 검색</a>
+  <a class="button {{ 'quiet' if current == 'question' else 'secondary' }}" href="/questions"{% if current == 'question' %} aria-current="page"{% endif %}>통화에 질문</a>
+</nav>
+{% endmacro %}

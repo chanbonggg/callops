@@ -1,4 +1,4 @@
-<audio controls preload="none">
+<audio controls preload="none" aria-label="원본 녹음">
   <source src="/recordings/{{ row.id }}/audio">
   {% if row.classification_status == 'BUSINESS_APPROVED' %}
   <source src="/recordings/{{ row.id }}/audio?play=pcm" type="audio/wav">

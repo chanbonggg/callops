@@ -48,7 +48,7 @@ def main():
                 from callops.processing.queue import Queue
                 service.recover()
                 Queue(service).reap()
-                print('Maintenance completed; offline worker copies may still require confirmation')
+                print('Maintenance pass finished; failed copies and unconfirmed worker cleanup stay pending')
     except Conflict as error:
         if args.command == 'ingest' and str(error) in {
             'INVALID_PATH', 'INVALID_HASH', 'INVALID_AUDIO', 'UNSUPPORTED_AUDIO_FORMAT', 'TRANSFER_INCOMPLETE',

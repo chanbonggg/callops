@@ -46,7 +46,7 @@ def routes(service):
         fields = {'q': '', 'counterparty': '', 'from_date': '', 'to_date': ''}
         context = {
             'fields': fields, 'csrf': request.state.login['csrf'], 'query_limit': MAX_QUERY_LENGTH,
-            'call_timezone': CALL_TIMEZONE,
+            'call_timezone': CALL_TIMEZONE, 'active_nav': 'search',
         }
         status_code = 200
         if request.method == 'POST':

@@ -109,7 +109,7 @@ def review_candidates(service, recording_id):
 def list_schedules(service):
     with service.transaction() as conn:
         now = service.clock()
-        return conn.execute('''SELECT s.id,s.source,s.title,s.start_at,s.end_at,s.revision,s.recording_id,
+        return conn.execute('''SELECT s.id,s.source,s.title,s.start_at,s.end_at,s.revision,s.recording_id,r.counterparty,
                 s.approved_revision,d.status AS delivery_status,d.revision AS delivery_revision,
                 d.candidate_id AS delivery_candidate_id,f.id AS transcript_id,
                 CASE WHEN f.id IS NOT NULL THEN a.candidate_id END AS candidate_id,
