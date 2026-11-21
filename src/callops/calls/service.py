@@ -337,9 +337,13 @@ class Service:
         conn.execute('''UPDATE callops.tasks SET recording_id=NULL,title=NULL,due_at=NULL,status=NULL,
             completed_at=NULL,deleted_at=COALESCE(deleted_at,%s),revision=revision+1
             WHERE recording_id=%s''', (self.clock(), recording_id))
-        conn.execute('''UPDATE callops.schedules SET recording_id=NULL,title=NULL,start_at=NULL,end_at=NULL,
-            approved_candidate_id=NULL,approved_revision=NULL,deleted_at=%s,revision=revision+1
-            WHERE recording_id=%s''', (self.clock(), recording_id))
+        conn.execute('''WITH removed_schedules AS (
+            UPDATE callops.schedules SET recording_id=NULL,title=NULL,start_at=NULL,end_at=NULL,
+                approved_candidate_id=NULL,approved_revision=NULL,deleted_at=%s,revision=revision+1
+            WHERE recording_id=%s RETURNING id
+        )
+        UPDATE callops.mock_calendar_events e SET title=NULL,start_at=NULL,end_at=NULL
+        FROM removed_schedules s WHERE e.event_id=s.id''', (self.clock(), recording_id))
         conn.execute("UPDATE callops.jobs SET status='CANCELLED' WHERE recording_id=%s", (recording_id,))
         conn.execute('''UPDATE callops.attempts SET cleanup_requested=true WHERE job_id IN
             (SELECT id FROM callops.jobs WHERE recording_id=%s)''', (recording_id,))

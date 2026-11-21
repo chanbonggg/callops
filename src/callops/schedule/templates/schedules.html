@@ -78,6 +78,7 @@
           <p class="hint">전사 근거를 확인할 수 없습니다.</p>
         {% endif %}
         {% if row.delivery_status == 'SUCCEEDED' %}
+          <a class="button primary" href="/schedules/{{ row.id }}/calendar?date={{ selected }}">연결 일정 상세</a>
           <p class="hint">이벤트 ID {{ row.id }}</p>
           {% if row.candidate_id and (row.delivery_revision != row.approved_revision or row.delivery_candidate_id != row.candidate_id) %}
             <p class="hint">등록 이후 승인 내용이 변경됐습니다.</p>

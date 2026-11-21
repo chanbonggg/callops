@@ -1,0 +1,118 @@
+{% extends "layout.html" %}
+{% set main_class = 'schedule-linked' %}
+{% set heading = {'detail': '일정 상세', 'edit': '일정 수정', 'conflict': '일정 변경 충돌',
+                  'missing': '연결 일정을 찾을 수 없습니다'}[mode] %}
+{% block title %}{{ heading }}{% endblock %}
+{% block head %}
+  {% if mode == 'conflict' and not row.remote_deleted %}<script defer src="/task-assets/calendar-choice.js"></script>{% endif %}
+{% endblock %}
+{% macro versions() %}
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="revision" value="{{ row.revision }}">
+  <input type="hidden" name="remote_version" value="{{ row.remote_version }}">
+{% endmacro %}
+{% macro time_range(slot) %}
+  <time datetime="{{ slot.start }}">{{ slot.time_label }}</time>
+{% endmacro %}
+{% block content %}
+  {% set detail_back = mode in ('edit', 'conflict') %}
+  <a class="back" href="{{ detail_url if detail_back else calendar_url }}"><img src="/task-assets/back.svg" width="15" height="15" alt="">{{ '일정 상세' if detail_back else '월간 캘린더' }}</a>
+  <header class="linked-heading">
+    <h1>{{ heading }}</h1>
+    {% if mode == 'edit' %}<p class="hint">모의 Google Calendar에 연결된 일정</p>
+    {% elif current %}<p class="hint">{{ current.title }}{% if counterparty %} · {{ counterparty }}{% endif %}</p>{% endif %}
+  </header>
+  {% if error %}<p class="notice" role="alert" id="linked-error">{{ error }}</p>{% endif %}
+  {% if mode == 'edit' %}
+    <form method="post" action="{{ detail_url }}" class="linked-form">
+      {{ versions() }}
+      <input type="hidden" name="action" value="edit">
+      <div class="card linked-fields">
+        <label for="linked-title">제목</label>
+        <input id="linked-title" name="title" value="{{ fields.get('title', '') }}" maxlength="160" required{% if invalid_fields %} aria-describedby="linked-error"{% endif %}>
+        {% for name, label in [('start', '시작'), ('end', '종료')] %}
+          <label for="linked-{{ name }}">{{ label }} · 한국 시간</label>
+          <input id="linked-{{ name }}" name="{{ name }}" value="{{ fields.get(name, '') }}" required
+                 {% if invalid_fields %}aria-describedby="linked-error" placeholder="예: 2026-11-19T15:00"{% else %}type="datetime-local" step="1"{% endif %}>
+        {% endfor %}
+      </div>
+      <p class="hint">저장하면 변경한 내용이 모의 Calendar에도 반영돼요.</p>
+      <div class="actions"><a class="button secondary" href="{{ detail_url }}">취소</a><button class="primary">변경 저장</button></div>
+    </form>
+  {% elif mode == 'conflict' %}
+    <div class="notice linked-warning">
+      <strong>양쪽에서 일정이 변경됐어요</strong>
+      <p>{{ 'Google Calendar에서 일정을 삭제했어요.' if row.remote_deleted else '두 값을 비교하고 적용할 일정을 선택하세요.' }}</p>
+    </div>
+    <form method="post" action="{{ detail_url }}" class="linked-form"{% if not row.remote_deleted %} id="calendar-resolution"{% endif %}>
+      {{ versions() }}
+      <input type="hidden" name="action" value="resolve">
+      {% if draft %}
+        <input type="hidden" name="draft" value="yes">
+        {% for name in ('title', 'start', 'end') %}<input type="hidden" name="{{ name }}" value="{{ draft[name] }}">{% endfor %}
+      {% endif %}
+      {% set same_day = remote and local_option.day == remote.day %}
+      {% if same_day %}<p class="hint">{{ local_option.date_label }} · 한국 시간</p>{% endif %}
+      <fieldset class="linked-options" aria-label="적용할 일정">
+        {% for value, label, slot in [('local', 'CallOps에서 수정', local_option), ('remote', 'Google Calendar에서 수정', remote)] %}
+          <label class="card linked-option">
+            {% if not row.remote_deleted %}<input type="radio" name="choice" value="{{ value }}" required>{% endif %}
+            <span>
+              <strong class="hint">{{ label }}</strong>
+              {% if slot %}
+                {% if slot.title != current.title %}<span>{{ slot.title }}</span>{% endif %}
+                {% if not same_day %}<span class="hint">{{ slot.date_label }} · 한국 시간</span>{% endif %}
+                {{ time_range(slot) }}
+              {% else %}<strong>일정 삭제됨</strong>{% endif %}
+            </span>
+          </label>
+        {% endfor %}
+      </fieldset>
+      <p class="hint">{{ '삭제를 반영하면 월간 캘린더에서 이 일정이 사라져요.' if row.remote_deleted else '선택한 값을 두 캘린더에 적용해요.' }}</p>
+      <div class="actions">
+        <a class="button secondary" href="{{ detail_url }}">나중에</a>
+        {% if row.remote_deleted %}<button class="primary" name="choice" value="remote">삭제 반영</button>
+        {% else %}<button class="primary" data-apply>선택한 일정 적용</button>{% endif %}
+      </div>
+    </form>
+  {% elif mode == 'detail' %}
+    {% if current %}
+    <section class="card linked-card" aria-labelledby="linked-current">
+      <div class="schedule-heading"><h2 id="linked-current">현재 일정</h2><span class="count">모의 Google 연결</span></div>
+      <p class="hint">{{ current.date_label }} · 한국 시간</p>
+      {{ time_range(current) }}
+      {% if status == 'synced' and updated == 'remote' %}<p class="hint" role="status">Google Calendar에서 변경한 내용이 반영됐어요.</p>{% endif %}
+      {% if status in ('synced', 'local_changed') %}<a class="button secondary" href="{{ detail_url }}&amp;edit=1">일정 수정</a>{% endif %}
+    </section>
+    {% else %}<p class="notice" role="status">이 일정은 삭제됐어요.</p>{% endif %}
+    {% if status == 'conflict' %}
+      <section class="card linked-card">
+        <h2>일정 변경 충돌</h2>
+        <p class="hint">CallOps와 Google Calendar 양쪽에서 일정이 변경됐어요.</p>
+        <a class="button primary" href="{{ detail_url }}&amp;compare=1">충돌 해결</a>
+      </section>
+    {% elif status == 'remote_changed' %}
+      <section class="card linked-card">
+        <h2>Google Calendar 변경 사항</h2>
+        {% if row.remote_deleted %}<p class="hint">Google Calendar에서 이 일정이 삭제됐어요.</p>
+        {% else %}<p class="hint">{{ remote.title }} · {{ remote.date_label }} · 한국 시간</p>{{ time_range(remote) }}{% endif %}
+        <form method="post" action="{{ detail_url }}" class="actions">
+          {{ versions() }}
+          <button class="primary" name="action" value="pull">{{ '삭제 반영' if row.remote_deleted else 'Google 변경 가져오기' }}</button>
+        </form>
+      </section>
+    {% endif %}
+    <section class="card linked-card linked-agreement" aria-labelledby="linked-agreement">
+      <h2 id="linked-agreement">통화 당시 합의</h2>
+      {% if agreement %}
+        {% if not current or agreement.title != current.title or agreement.day != current.day %}
+          <p class="hint">{{ agreement.title }} · {{ agreement.date_label }} · 한국 시간</p>
+        {% endif %}
+        {{ time_range(agreement) }}
+        {% if quote %}<p class="hint">“{{ quote|truncate(160, false, '…') }}”</p>{% endif %}
+        {% for url in evidence %}<a class="button secondary" href="{{ url }}">전사 근거 보기{% if evidence|length > 1 %} · {{ loop.index }}{% endif %}</a>{% endfor %}
+      {% endif %}
+      {% if not evidence %}<p class="hint">전사 근거를 확인할 수 없습니다.</p>{% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

@@ -99,8 +99,12 @@ class DatabaseTests(unittest.TestCase):
                                       (schedule,)).fetchone(), ('approved', candidate, 1))
         self.assertEqual(conn.execute('SELECT source,title,deleted_at IS NOT NULL FROM callops.schedules WHERE id=%s',
                                       (orphan,)).fetchone(), ('call', None, True))
-        self.assertEqual(conn.execute('SELECT candidate_id FROM callops.calendar_deliveries WHERE logical_item_id=%s',
-                                      (schedule,)).fetchone(), (candidate,))
+        for event_id, candidate_id, synced_revision in ((schedule, candidate, 1), (orphan, None, None)):
+            self.assertEqual(conn.execute('''SELECT d.candidate_id,d.synced_schedule_revision,d.synced_event_version,
+                    e.version,e.deleted,e.title,e.start_at,e.end_at,e.payload_sha256
+                FROM callops.calendar_deliveries d JOIN callops.mock_calendar_events e ON e.event_id=d.logical_item_id
+                WHERE d.logical_item_id=%s''', (event_id,)).fetchone(),
+                (candidate_id, synced_revision, 1, 1, False, None, None, None, 'f' * 64))
         self.assertEqual(conn.execute('SELECT recording_id FROM callops.attempts WHERE id=%s', (attempt,)).fetchone(),
                          (recording,))
         for query, values in (

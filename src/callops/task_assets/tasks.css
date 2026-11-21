@@ -259,6 +259,28 @@ html { scroll-padding-bottom: 76px; }
 .past-confirmation { display: flex; align-items: flex-start; gap: 8px; }
 .review-card .past-confirmation input { width: auto; min-height: 0; margin: 4px 0 0; }
 
+.schedule-linked { grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 14px 21px; }
+.linked-heading .hint { margin-top: 3px; font-size: 14px; }
+.linked-card { padding-block: 14px; gap: 9px; }
+.linked-card time, .linked-option time { font-variant-numeric: tabular-nums; font-weight: 700; }
+.linked-card time { font-size: 25px; }
+.linked-agreement time { font-size: 21px; }
+.linked-form { display: grid; gap: 14px; min-width: 0; }
+.linked-form .actions > * { flex-basis: 0; text-align: center; }
+.linked-fields { padding-block: 14px; }
+.linked-fields label { font-size: 13px; }
+.linked-fields input + label { margin-top: 6px; }
+.linked-warning { gap: 4px; padding: 12px 14px; border: 1px solid #e9d5ac; border-radius: 12px; background: #fff4dd; color: #744b18; }
+.linked-warning p { font-size: 13px; }
+.linked-options { display: grid; gap: 8px; min-width: 0; padding: 0; margin: 0; border: 0; }
+.linked-option { display: flex; gap: 12px; align-items: center; min-height: 100px; }
+.linked-option > span { display: grid; gap: 2px; min-width: 0; }
+.linked-option time { font-size: 19px; }
+.linked-option:has(input) { cursor: pointer; }
+.linked-option:has(input:checked) { border-color: var(--brand); background: var(--soft); }
+.linked-option input[type="radio"] { flex: none; width: 22px; min-height: 0; height: 22px; margin: 0; padding: 0; accent-color: var(--brand); }
+.linked-form button:disabled { background: #e8ede9; color: var(--muted); cursor: default; }
+
 .callops-page { grid-template-columns: minmax(0, 1fr); gap: 12px; padding-block: 14px; }
 .callops-page .card { grid-template-columns: minmax(0, 1fr); }
 .call-detail { gap: 9px; padding-block: 10px; }

@@ -2,7 +2,7 @@
 
 from calendar import Calendar, SUNDAY, monthrange
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,7 +12,8 @@ from starlette.templating import Jinja2Templates
 
 from ..calls.service import CALL_TIMEZONE
 from ..common import Conflict
-from .calendar import send_schedule
+from .calendar import (change_linked_calendar, linked_calendar, linked_calendar_json, send_schedule,
+                       sync_fields, sync_status)
 from .manual import change_manual_schedule, create_manual_schedule, get_manual_schedule
 from .service import change_candidate, list_schedules, review_candidates
 
@@ -41,6 +42,13 @@ MANUAL_CONFLICTS = {
     'INVALID_SCHEDULE_ACTION': '요청을 처리할 수 없습니다. 목록에서 일정을 다시 열어 주세요.',
 }
 WEEKDAYS = '월화수목금토일'
+LINKED_ERRORS = {
+    'STALE_CALENDAR_SYNC': '일정이 다시 변경됐어요. 최신 값을 확인해 주세요.',
+    'CALENDAR_SYNC_CONFLICT': 'Calendar 변경 사항을 확인해 주세요.',
+    'CALENDAR_EVENT_DELETED': 'Calendar에서 삭제된 일정은 다시 등록할 수 없어요.',
+    'INVALID_CALENDAR_SYNC': '적용할 일정을 선택해 주세요.',
+    'INVALID_SCHEDULE_FIELDS': FORM_ERRORS['INVALID_SCHEDULE_FIELDS'],
+}
 
 
 def selected_date(request, now):
@@ -99,6 +107,35 @@ def schedule_json(row):
             'calendar_event_id': str(row['id']) if status == 'SUCCEEDED' else None}
 
 
+def schedule_form(row):
+    form = {'title': row['title'], 'revision': row['revision']}
+    for field in ('start', 'end'):
+        local = row[f'{field}_at'].astimezone(CALL_TIMEZONE)
+        form[field] = local.replace(tzinfo=None).isoformat(timespec='seconds' if local.second else 'minutes')
+    return form
+
+
+def local_slot(title, start, end):
+    if title is None:
+        return None
+    start, end = (value.astimezone(CALL_TIMEZONE) for value in (start, end))
+
+    def clock(value):
+        fmt = ':%M:%S' if value.second else ':%M'
+        return f'{value.hour % 12 or 12}{value.strftime(fmt)}'
+
+    start_period, end_period = ('오전' if value.hour < 12 else '오후' for value in (start, end))
+    end_label = clock(end)
+    if start.date() != end.date():
+        end_label = f'{end.year}년 {end.month}월 {end.day}일 {end_period} {end_label}'
+    elif start_period != end_period:
+        end_label = f'{end_period} {end_label}'
+    return {'title': title, 'day': start.date(),
+            'date_label': f'{start.year}년 {start.month}월 {start.day}일 {WEEKDAYS[start.weekday()]}요일',
+            'time_label': f'{start_period} {clock(start)}–{end_label}',
+            'start': start.isoformat()}
+
+
 def routes(service, owner):
     def page(request, error=None):
         recording, candidates = review_candidates(service, request.path_params['recording_id'])
@@ -143,6 +180,113 @@ def routes(service, owner):
     def schedule_api(request):
         return JSONResponse({'csrf': request.state.login['csrf'],
                              'schedules': [schedule_json(row) for row in list_schedules(service)]})
+
+    def linked_calendar_api(request):
+        schedule_id = request.path_params['schedule_id']
+        if request.method == 'POST':
+            row = change_linked_calendar(service, schedule_id, request.state.form)
+        else:
+            row = linked_calendar(service, schedule_id)
+        return JSONResponse(linked_calendar_json(row))
+
+    def linked_page(request):
+        schedule_id = request.path_params['schedule_id']
+        path = f'/schedules/{schedule_id}/calendar'
+        day = selected_date(request, service.clock())
+        form = request.state.form if request.method == 'POST' else {}
+        action = form.get('action')
+        choice = form.get('choice')
+        error = None
+        draft = None
+        try:
+            row = linked_calendar(service, schedule_id)
+            if request.method == 'POST':
+                try:
+                    if action == 'resolve' and choice in ('local', 'remote'):
+                        if choice == 'local' and form.get('draft') != 'yes':
+                            fields = schedule_form(row) if row['deleted_at'] is None else {}
+                            submission = form | {key: fields.get(key, '') for key in ('title', 'start', 'end')}
+                        else:
+                            submission = form
+                        submission = submission | {'action': 'edit' if choice == 'local' else 'pull', 'resolve': 'yes'}
+                    elif action in ('edit', 'pull'):
+                        submission = form | {'resolve': ''}
+                    else:
+                        raise Conflict('INVALID_CALENDAR_SYNC')
+                    result = change_linked_calendar(service, schedule_id, submission)
+                except Conflict as exc:
+                    code = str(exc)
+                    error = LINKED_ERRORS.get(code)
+                    if error is None:
+                        raise
+                    row = linked_calendar(service, schedule_id)
+                    same_revision = form.get('revision') == str(row['revision'])
+                    if code == 'INVALID_SCHEDULE_FIELDS' and (
+                            not same_revision or form.get('remote_version') != str(row['remote_version'])):
+                        error = LINKED_ERRORS['STALE_CALENDAR_SYNC']
+                    if (code in ('STALE_CALENDAR_SYNC', 'CALENDAR_SYNC_CONFLICT')
+                            and same_revision and not row['remote_deleted']
+                            and sync_status(row) in ('remote_changed', 'conflict')
+                            and (action == 'edit' or form.get('draft') == 'yes')):
+                        try:
+                            draft = local_slot(*sync_fields(form, local=True))
+                        except Conflict:
+                            pass  # A stale remote selection may also contain an obsolete edit draft.
+                        else:
+                            if action == 'edit' and code == 'STALE_CALENDAR_SYNC':
+                                error = None
+                else:
+                    if result['start_at'] is not None:
+                        day = result['start_at'].astimezone(CALL_TIMEZONE).date()
+                    updated = '&updated=remote' if submission['action'] == 'pull' else ''
+                    return RedirectResponse(f'{path}?date={day}{updated}', status_code=303)
+        except Conflict as exc:
+            if str(exc) != 'CALENDAR_NOT_LINKED':
+                raise
+            row = None
+
+        mode = 'missing'
+        context = {}
+        if row:
+            status = sync_status(row)
+            current = local_slot(row['title'], row['start_at'], row['end_at'])
+            remote = local_slot(row['remote_title'], row['remote_start_at'], row['remote_end_at'])
+            agreement = row['agreement']
+            agreement_slot = local_slot(agreement['title'], datetime.fromisoformat(agreement['start_at']),
+                                        datetime.fromisoformat(agreement['end_at'])) if agreement else None
+            mode = 'detail'
+            if draft or (status == 'conflict' and (request.method == 'POST' or request.query_params.get('compare') == '1')):
+                mode = 'conflict'
+            elif (current and status in ('synced', 'local_changed')
+                    and (request.query_params.get('edit') == '1' or action == 'edit')):
+                mode = 'edit'
+            context = {'row': row, 'status': status, 'current': current, 'remote': remote,
+                       'local_option': draft or current, 'agreement': agreement_slot}
+            if mode == 'edit':
+                invalid_fields = error == FORM_ERRORS['INVALID_SCHEDULE_FIELDS']
+                context.update(fields=form if invalid_fields else schedule_form(row), invalid_fields=invalid_fields)
+            elif mode == 'detail' and agreement:
+                try:
+                    recording, _, transcript = service.transcript(row['recording_id'], agreement['transcript_id'])
+                except Conflict as exc:
+                    if str(exc) in ('RECORDING_UNAVAILABLE', 'APPROVAL_REVOKED', 'NOT_FOUND'):
+                        context = {}
+                        mode = 'missing'
+                    else:
+                        context['evidence'] = []
+                else:
+                    context['counterparty'] = recording['counterparty']
+                    context['evidence'] = linked_calendar_json(row)['evidence']
+                    if transcript['schema_version'] == 2 and agreement['segment_ids']:
+                        index = agreement['segment_ids'][0] - 1
+                        if 0 <= index < len(transcript['segments']):
+                            context['quote'] = transcript['segments'][index]['text']
+
+        return TEMPLATES.TemplateResponse(request, 'linked.html', {
+            **context, 'mode': mode, 'detail_url': f'{path}?date={day}', 'calendar_url': f'/schedules?date={day}',
+            'error': error, 'draft': form if draft else None, 'csrf': request.state.login['csrf'],
+            'updated': request.query_params.get('updated'),
+        }, status_code=404 if mode == 'missing' else 409 if error or draft else 200)
 
     def manual_create(request):
         row, created = create_manual_schedule(service, request.state.form)
@@ -192,11 +336,7 @@ def routes(service, owner):
             if row is None:
                 return manual_form(request, 'missing', error=MANUAL_CONFLICTS['MANUAL_SCHEDULE_NOT_FOUND'],
                                    status_code=404)
-            form = {'title': row['title'], 'revision': row['revision']}
-            for field in ('start', 'end'):
-                local = row[f'{field}_at'].astimezone(CALL_TIMEZONE)
-                form[field] = local.replace(tzinfo=None).isoformat(timespec='seconds' if local.second else 'minutes')
-            return manual_form(request, mode, form)
+            return manual_form(request, mode, schedule_form(row))
         form = request.state.form
         try:
             row = change_manual_schedule(service, schedule_id, form | {'action': mode})
@@ -208,9 +348,11 @@ def routes(service, owner):
     return [Route('/recordings/{recording_id:uuid}/schedule', page),
             Route('/recordings/{recording_id:uuid}/schedule/{candidate_id:uuid}', submit, methods=['POST']),
             Route('/schedules', schedules), Route('/schedules/{candidate_id:uuid}/send', send, methods=['POST']),
+            Route('/schedules/{schedule_id:uuid}/calendar', linked_page, methods=['GET', 'POST']),
             Route('/schedules/manual/new', manual_new_page, methods=['GET', 'POST']),
             Route('/schedules/manual/{schedule_id:uuid}', manual_item_page, methods=['GET', 'POST']),
             Route('/schedules/manual/{schedule_id:uuid}/delete', manual_item_page, methods=['GET', 'POST'],
                   name='manual_schedule_delete'),
             Route('/api/schedules', schedule_api), Route('/api/schedules/manual', manual_create, methods=['POST']),
+            Route('/api/schedules/{schedule_id:uuid}/calendar', linked_calendar_api, methods=['GET', 'POST']),
             Route('/api/schedules/manual/{schedule_id:uuid}', manual_change, methods=['POST'])]
