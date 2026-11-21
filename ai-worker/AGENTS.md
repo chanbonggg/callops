@@ -13,4 +13,4 @@
 ## 변경 시 확인
 
 - 실제 모델 호출을 기본 검사에 넣지 않는다. 모델 캐시·드라이버·패키지·데스크톱 연결 변경은 해당 환경의 실행 계획을 따른다. [데스크톱 계획](../docs/02-desktop.md)
-- 루트에서 `python -m unittest discover -s ai-worker/tests -v`로 전사 생성·시간 검증·원자적 저장을 검사한다. 실제 GPU 품질·서버 큐 통합 검증은 별도 단계다. [전사 모의 테스트](tests/test_transcriber.py)
+- 루트에서 `python -m unittest discover -s ai-worker/tests -v`로 전사 생성·시간 검증·원자적 저장과 분석 요청·응답 스키마를 검사한다. 분석 테스트에는 Pydantic 2가 필요하며 Ollama 호출을 모의 처리한다. 실제 GPU 품질·서버 큐 통합 검증은 별도 단계다. [전사 모의 테스트](tests/test_transcriber.py) · [분석 모의 테스트](tests/test_analyzer.py)

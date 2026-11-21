@@ -114,6 +114,7 @@
 
 - [x] **기존 환경 파악과 단독 실험** — 과거 사용자 확인 기준 RTX 4060 Ti 8GB·WSL2 Ubuntu에서 Whisper GPU 전사와 Ollama `qwen3:8b` 분석에 성공했다. 저장소 분석 코드의 실행도 사용자가 확인했다. 당시 장비의 실험 기록이며 이번 점검에서는 장비를 다시 조회하지 않았다. [프로젝트 README](../README.md) · [AI 실행 안내](../ai-worker/README.md)
 - [x] **Qwen 단독 분석 코드** — `app/analyzer.py`, 프롬프트와 Pydantic 스키마를 추가해 전사 텍스트에서 요약·일정·할 일·계약 언급 및 근거 구조를 반환하는 기반을 마련했다. [분석 코드](../ai-worker/app/analyzer.py) · [출력 스키마](../ai-worker/app/schemas.py)
+- [x] **Qwen 분석 모의 검증(2026-11-19)** — 모델 호출을 대체한 검사 4개로 분석 요청과 구조화 응답, 빈 전사와 잘못된 응답, 서버의 요약 형식을 확인했다. 현재 분석의 문자열 요약은 서버의 `summary.text`·`summary.segment_ids` 형식으로 연결하는 작업이 필요하다. [분석 모의 테스트](../ai-worker/tests/test_analyzer.py)
 - [x] **Whisper 단독 전사 코드** — `app/transcriber.py`에 기존 실험의 `large-v3-turbo`, CUDA, `int8_float16`, 한국어 설정을 옮겼다. 구간 시간 검증, 빈 전사 경고, Git 밖 JSON 저장, 기존 파일 보호와 원문 없는 오류 처리를 구현했다. GPU 없는 모의 테스트 8개를 통과했다. [전사 실행 안내](../ai-worker/README.md) · [모의 테스트](../ai-worker/tests/test_transcriber.py)
 
 ### 해야 할 일

@@ -23,12 +23,14 @@ python -m app.transcriber \
 
 ## GPU 없이 코드 검사
 
-저장소 루트에서 실행한다. stdlib `unittest.mock`으로 Whisper 생성·결과 이터레이터를 관찰하며 모델 다운로드·GPU·외부 서비스 호출은 없다.
+저장소 루트에서 실행한다. 전사·분석 테스트는 `unittest.mock`으로 Whisper와 Ollama 호출을 대체한다. 분석 테스트에는 기존 스키마를 검증하는 Pydantic 2가 필요하다. GPU, 모델 파일, Ollama 설치는 필요 없다.
 
 ```text
 python -m unittest discover -s ai-worker/tests -v
 python scripts/check.py
 ```
+
+분석만 검사하려면 `python -m unittest discover -s ai-worker/tests -p test_analyzer.py -v`를 실행한다. 분석 요청과 구조화 결과, 빈 전사, 잘못된 JSON 및 누락된 필드·근거를 검증한다. 서버 검증기에 문자열 요약을 보내면 거절되고, 합성 결과에 `summary.text`와 `summary.segment_ids`를 함께 보내면 형식 검사를 통과한다. 현재 분석 스키마는 요약을 문자열로 제공한다. [분석 모의 테스트](tests/test_analyzer.py) · [서버 요약 계약](../docs/p2-p3-server.md#합성-요약-결과-스키마와-조회)
 
 2026-10-09 검증: 전사 모듈 테스트 8개가 Windows Python 3.12와 WSL Python에서 통과했다. 기본 하네스 6개와 새 PostgreSQL 클러스터의 P1~P3 전체 29개도 통과했고 임시 클러스터를 종료·정리했다. Windows 샌드박스의 임시 경로·하드 링크 제한과 DB 준비 시간 초과 이후, 쓰기 가능한 임시 경로 및 샌드박스 밖 실행으로 재검증했다. 모델 호출은 Mock이며 새 전사 모듈의 실제 GPU 실행을 뜻하지 않는다.
 
