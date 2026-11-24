@@ -34,7 +34,7 @@ python scripts/manage.py maintain
 
 수집 CLI는 완료 해시 불일치·임시 파일을 `TRANSFER_INCOMPLETE`, 잘못된 해시 표기를 `INVALID_HASH`, 미지원 확장자·코덱·스트림을 `UNSUPPORTED_AUDIO_FORMAT`, 형식 위장·손상·상한 초과를 `INVALID_AUDIO`로 표시한다. 파일명과 비밀값은 오류 출력에서 제외한다.
 
-`maintain`은 만료·사본 청소·임대 회수·파일/DB 복구를 한 번 실행한다. 주기 실행 서비스는 아직 설치하지 않았다. 운영 전 C1에서 주기를 설정해야 한다. 조회 GET은 만료 데이터를 차단하지만 삭제나 업무 상태 변경을 수행하지 않는다.
+`maintain`은 만료·사본 청소·임대 회수·파일/DB 복구를 한 번 실행한다. 홈서버에 유지보수 컨테이너가 실행 중이며 주기와 만료 청소 결과는 운영 환경에서 검증할 예정이다. 조회 GET은 만료 데이터를 차단하지만 삭제나 업무 상태 변경을 수행하지 않는다. [홈서버 확인 기록](progress-checklist.md#실제-장비외부-연결이-필요한-작업)
 
 DB가 불가하면 앱은 신규 격리 복사 전에 실패한다. 실제 동기화 수신을 멈추는 어댑터는 연결하지 않았으므로 C2/C7의 실제 수신 중단 시험까지 완료한 것은 아니다. 사용자가 수동으로 inbox에 쓰는 것까지 막는다고 해석하지 않는다.
 
@@ -79,7 +79,7 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 | 요청 | 목적 |
 |---|---|
 | `POST /worker/claim` | 승인된 작업의 임대와 고정 입력 식별자 발급 |
-| `GET /worker/jobs/{id}/input` | 할당된 워커/현재 임대의 입력만 조회 |
+| `GET /worker/jobs/{id}/input` | 할당된 워커/현재 임대의 입력만 조회한다. STT는 원음 바이트, 분석은 고정된 전사 artifact를 반환한다. 서버→GPU 전달은 이 API뿐이며 별도 폴더 동기화는 없다. [전달 방식](01-project.md#승인-음성의-gpu-전달-방식) |
 | `POST /worker/jobs/{id}/heartbeat` | 임대만 갱신 |
 | `POST /worker/jobs/{id}/start` | 요청 ID에 고정된 실행 기한 확인 |
 | `POST /worker/jobs/{id}/prepared` | spool 요청 ID·정확한 해시·크기·생성 시각 고정 |

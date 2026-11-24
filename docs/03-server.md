@@ -1,6 +1,6 @@
 # 3. 서버 — 프로젝트와 독립적인 공용 n8n 설치·운영
 
-작성일: 2026-09-19 · 상태: 검토용 초안 · 서버 설치/설정 변경 미실행
+2026-11-24 · 홈서버에 공용 n8n 설치 · 최초 관리자 등록 대기
 
 연결 문서: [이 프로젝트](01-project.md) · [데스크톱](02-desktop.md)
 
@@ -32,22 +32,37 @@
 
 ## 2. 현재 확인된 환경
 
-사용자가 제공한 출력 기준이다. 이번 문서 수정에서 원격 서버를 재조회하지 않았다.
+2026-11-24 홈서버를 SSH로 점검한 결과다. 자원 수치는 설치 전 기준이다.
 
 | 항목 | 확인된 내용 |
 |---|---|
 | OS | Ubuntu 24.04.4 LTS |
 | Docker / Compose | 29.7.2 / 5.4.0 |
-| 메모리 | 당시 총 약 25GiB, available 약 22GiB |
-| 디스크 | 루트 ext4 약 457GiB, 당시 available 약 415GiB |
-| 기존 서비스 | chanvoca, finel, Uptime Kuma |
-| 기존 DB | chanvoca PostgreSQL 17, finel PostgreSQL 18 컨테이너 |
-| psql | 클라이언트 18.6; 호스트 DB 서버 설치를 의미하지 않음 |
-| n8n | 미설치 |
-| VPN | 접속 가능; 이름·주소·DNS·ACL은 미확인 |
+| 메모리 | 총 약 25GiB, 가용 약 22GiB |
+| 디스크 | 루트 ext4 약 457GiB, 가용 약 398GiB |
+| 기존 서비스 | CallOps, chanvoca, finel, Uptime Kuma, Homepage, Grafana, Prometheus, Nginx |
+| 기존 DB | chanvoca PostgreSQL 17, finel·CallOps PostgreSQL 18 컨테이너 |
+| n8n | `/srv/ops/n8n`의 별도 Compose, n8n 2.48.8과 전용 PostgreSQL 18.7 |
+| 관리 접속 | Tailscale SSH를 통해 서버의 `127.0.0.1:5678`로 포워딩 |
 | 암호화/별도 백업 | 추가 구축 보류 |
 
-기존 프로젝트 DB를 n8n 시스템 DB로 임의 재사용하지 않는다. n8n 전용 PostgreSQL·역할·볼륨을 별도로 준비하는 기본안으로 검토한다. 기존 공용 DB 활용을 원하면 먼저 운영·권한·변경 영향을 확인한다.
+Compose의 이미지는 다이제스트로 고정했다. n8n용 DB, 네트워크와 두 영속 볼륨은 해당 스택에 있다. DB 포트는 호스트에 공개하지 않으며, 앱은 n8n DB를 소유하는 비슈퍼유저 역할로 접속한다. 앱과 DB의 준비 상태, 로그 회전과 재시작 정책을 Compose에 설정했다.
+
+### 최초 관리 접속
+
+로컬 터미널에서 SSH 터널을 열고 브라우저로 `http://localhost:5678`에 접속한다. 최초 화면에서 소유자 계정을 직접 등록한다.
+
+```powershell
+ssh -N -o ExitOnForwardFailure=yes -L localhost:5678:127.0.0.1:5678 my-server
+```
+
+시스템 DB 비밀번호와 n8n 암호화 키는 서버에서 생성해 설치 디렉터리의 `.env`에 보관했다. 설치 디렉터리는 `0700`, `.env`는 `0600`이다. 영구 VPN/HTTPS 주소, 관리자 로그인, 키의 별도 보관은 S2에서 검증한다.
+
+### 설치 검증
+
+서버와 SSH 터널에서 `/healthz/readiness`의 HTTP 200을 확인했다. 같은 터널에서 관리 화면과 최초 소유자 등록 가능 상태를 확인했다. 비활성 `n8n setup check` 워크플로우는 Manual Trigger와 Edit Fields로 합성 값만 만들며, 두 컨테이너의 재시작 전후에 같은 값을 반환했다. 성공·실패·수동 실행의 저장을 끄도록 설정했으며, 설치에 사용한 CLI 실행 2건은 DB에 남았다. 웹에서 수동 실행·실패·pin data 보관 동작과 Kuma 등록은 후속 확인 대상이다.
+
+일시 중지하려면 홈서버의 `/srv/ops/n8n`에서 `docker compose stop`을 실행한다. `docker compose up -d --wait`로 기존 영속 볼륨을 사용해 다시 시작할 수 있다.
 
 ## 3. S0 — n8n 설치 전 조사
 
@@ -177,8 +192,8 @@ n8n 자체 장애 감지는 가능하면 기존 Kuma에서 확인한다. 외부 
 
 ## 8. 공용 n8n 준비 완료 체크리스트
 
-- [ ] S0: 기존 서비스 영향·경로·포트 확인.
-- [ ] S1: n8n·시스템 DB 설치 및 영속성 확인.
+- [x] S0: 기존 서비스·경로·포트·가용 자원 확인.
+- [x] S1: n8n·시스템 DB 설치 및 재시작 뒤 워크플로우 실행 확인.
 - [ ] S2: 관리자 인증·VPN/HTTPS·암호화 키 보관 확인.
 - [ ] S3: 공통 이력 정책·가짜 워크플로우 시험·프로젝트 인계 정보 작성.
 - [ ] S4: 상태 확인·업데이트·복구 절차 확인.
