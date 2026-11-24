@@ -304,3 +304,22 @@ html { scroll-padding-bottom: 76px; }
 .call-pinned:has(.call-segment:only-of-type:target) .default-transcript-label { display: none; }
 .call-pinned:has(.call-segment:only-of-type:target) .target-label { display: inline; }
 .call-pinned .call-segment:only-of-type:target { padding: 0; outline: none; }
+
+.login-header { display: flex; }
+.login-header .wordmark { color: var(--brand); }
+.login-main { justify-items: center; padding-block: 74px 32px; }
+.login-card { width: min(100%, 424px); padding: 24px; gap: 22px; }
+.login-heading, .login-field, .login-actions { display: grid; }
+.login-heading { gap: 4px; }
+.login-heading h1 { line-height: 40px; }
+.login-heading p { color: var(--muted); line-height: 22px; }
+.login-fields { gap: 16px; }
+.login-field { gap: 6px; }
+.login-field label, .login-actions button { line-height: 21px; }
+.login-actions { gap: 12px; }
+.login-message { display: block; font-size: 13px; line-height: 20px; }
+.login-message.error { background: #fff0ed; color: var(--red); }
+
+@media (min-width: 700px) {
+  .login-main { padding-top: 124px; }
+}

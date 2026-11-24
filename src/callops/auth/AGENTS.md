@@ -7,6 +7,7 @@
 ## 요청 흐름
 
 - `GET /login`은 로그인용 CSRF 토큰을 만든다. 로그인 POST는 토큰과 scrypt 비밀번호 해시를 검증한다. 실패 횟수와 재시도 시각은 PostgreSQL에 저장한다.
+- 로그인 실패와 시도 제한은 `Accept`에 따라 로그인 폼 또는 JSON을 같은 HTTP 상태로 반환한다. 로그인 화면의 공통 CSS와 워드마크는 로그인 전에 `GET`·`HEAD`로 제공한다. [로그인 화면 계약](../../../docs/p2-p3-server.md#로그인-화면)
 - 로그인 성공 시 서명된 세션 쿠키에 토큰을 두고 DB에 토큰 해시와 CSRF, 만료 시각을 저장한다. 보호된 요청은 DB 세션을 확인해 `request.state.login`을 채운다. 로그아웃 POST는 DB 세션을 폐기한다.
 - `/worker/`는 Bearer 토큰으로 워커를 식별해 `request.state.worker`를 채운다. 작업별 임대와 권한은 큐에서 확인한다. [워커 요청 흐름](../processing/AGENTS.md)
 

@@ -62,6 +62,8 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 
 로그인 CSRF, Secure/HttpOnly/SameSite 쿠키, DB 세션 8시간 만료, 로그아웃 시 서버 세션 폐기, 로그인 실패 제한을 적용한다. 목록·음성·분류 모두 사용자 세션이 필요하다. 분류/로그아웃은 POST와 CSRF를 검사한다. 워커 Bearer 토큰은 워커 API에 사용한다. 브라우저 요청 본문은 16KiB, 워커 요청 본문은 8MiB로 제한한다. 기존 Flask 세션 쿠키를 사용하던 브라우저는 Starlette로 전환 후 다시 로그인한다. 기존 scrypt 비밀번호 해시로 로그인할 수 있다. [Starlette 미들웨어 문서](https://starlette.dev/middleware/)
 
+`/login`은 모바일과 PC에서 공통 CallOps 스타일을 사용한다. HTML을 선호하는 브라우저 요청은 자격 증명 실패 시 `401`, 시도 제한 시 `429`로 로그인 폼을 다시 열고 안내를 표시한다. JSON 응답은 같은 상태 코드와 `LOGIN_FAILED` 또는 `LOGIN_THROTTLED`를 반환한다. 로그인 전에 폼에 필요한 `/task-assets/tasks.css`와 `/task-assets/wave.svg`를 `GET`·`HEAD`로 불러올 수 있다. [승인된 Figma 시안](https://www.figma.com/design/FTB08BRgu0d4mXnIWlg8MP?node-id=66-1090)
+
 목록에는 최근 200건이 표시된다. 브라우저 조작 증거와 Figma 반영 상태는 [화면별 상태](progress-checklist.md#화면별-상태)를 참고한다. 음성 응답은 한 파일을 메모리로 읽으므로 최대 크기 동시 재생의 성능은 검증하지 않았다.
 
 원음 응답은 확인된 컨테이너에 맞는 MIME 타입을 반환한다. 통화 상세의 오디오 플레이어는 원음 재생에 실패한 경우 업무 승인된 M4A·AMR을 모노 16kHz PCM WAV로 변환해 재생할 수 있다. 호환 응답은 요청 시 메모리에서 만들며 디스크에 추가 사본을 생성하지 않는다. 변환 중 사적 전환이나 만료가 발생하면 응답을 차단한다.
@@ -267,7 +269,7 @@ HTML 폼과 아래 JSON API는 같은 입력 검증과 저장 함수를 쓴다. 
 
 ## 확인 범위
 
-**최신(2026-11-24)** — Windows PostgreSQL 18.0 임시 클러스터에서 `python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3`를 다시 실행해 하네스 7개·P1 3개·P2 18개·P3 70개, 총 98개가 skip 없이 통과했다. 012 마이그레이션과 연결 일정 동기화, 만료 정리, 할 일 후보, 질문 화면을 포함한다. 2026-11-19에 한 번 HTTP 503으로 실패했던 기존 큐 검사 2개는 이번 전체 실행에서 재현되지 않았지만 원인은 확인하지 못했다. 아래는 당시 시점의 기록이며 개수와 범위는 그때 기준이다.
+**최신(2026-11-24)** — 로그인 UI 반영 후 Windows PostgreSQL 18.0 임시 클러스터에서 `python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3`를 실행했다. 하네스 7개·P1 3개·P2 19개·P3 70개, 총 99개가 skip 없이 통과했다. 브라우저 로그인 오류 응답과 미인증 정적 자산 접근, 012 마이그레이션과 연결 일정 동기화, 만료 정리, 할 일 후보, 질문 화면을 포함한다. 2026-11-19에 한 번 HTTP 503으로 실패했던 기존 큐 검사 2개도 통과했다. 당시 실패 원인은 확인하지 못했다. 아래는 당시 시점의 기록이며 개수와 범위는 그때 기준이다.
 
 2026-11-11 전사 검색 추가 후 하네스·P1~P3 46개를 통과했다. 임시 데이터로 로컬 HTTPS에서 수신·업무 승인·가짜 워커 처리 후 전사 검색과 고정 근거 링크를 확인했다.
 

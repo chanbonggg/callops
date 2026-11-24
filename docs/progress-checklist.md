@@ -12,7 +12,7 @@
 
 | 화면 | 기능 구현 | Figma 시안 및 코드 반영 | 브라우저 증거와 남은 작업 |
 | --- | --- | --- | --- |
-| 로그인 `/login` | 세션 로그인·로그아웃, 인증·시도 제한 | 2026-11-18 Figma 확인 결과 로그인 전용 프레임이 없다. 웹은 공통 스타일을 적용하지 않은 [독립 템플릿](../src/callops/auth/templates/login.html)을 사용 | 로컬 HTTPS와 인증 검사 기록 있음. 내비게이션 변경 후 로그인에서 목록으로 돌아오는 흐름 확인 |
+| 로그인 `/login` | 세션 로그인·로그아웃, 인증·시도 제한 | [36~39 · 승인된 로그인 시안](https://www.figma.com/design/FTB08BRgu0d4mXnIWlg8MP?node-id=66-1090)을 [반응형 로그인 폼](../src/callops/auth/templates/login.html)에 반영 | [로컬 HTTPS Chrome 320px·390px·1090px 검증](#검증과-git-상태) |
 | 통화 목록 `/` | 상대·한국 날짜 필터, 상태, 상세 링크 | 01. [목록 템플릿](../src/callops/calls/templates/index.html)에 공통 헤더·하단 메뉴·카드 적용 | [통화 화면 검증 기록](#검증과-git-상태) |
 | 통화 상세·인용 `/recordings/{id}` | 원음, 상대·시각 입력, 분류, 전사·고정 인용, 요약, 일정 후보 | 02·19. [상세 템플릿](../src/callops/calls/templates/detail.html)에 분류 전·업무·고정 근거·전사 및 원음 사용 불가 상태 반영 | [통화 화면 검증 기록](#검증과-git-상태) |
 | 전사 검색 `/search` | 키워드·거래처·기간 필터, 일치 발화와 인용 | 03. [검색 템플릿](../src/callops/search/templates/search.html)에 공통 UI와 통화 질문 전환 적용 | [통화 화면 검증 기록](#검증과-git-상태) |
@@ -134,6 +134,8 @@
 - [ ] **D6 · 장애와 상시 운영** — VPN 끊김, ACK 유실, 오프라인·전원 재시작, 연산 정지, 만료 임대, 취소 중 업로드를 재현한다. spool 재개·TTL·사본별 삭제 확인, 종료가 확인되지 않은 워커의 새 작업 차단, 자동 시작·상태 관측·버전 복귀를 검증한다. [D6](02-desktop.md#8-d6--상시-실행재시작청소-검증)
 
 ## 검증과 Git 상태
+
+- **로그인 UI 검증(2026-11-24)** — 임시 PostgreSQL과 로컬 HTTPS를 사용해 Chrome 320px·390px·1090px에서 배치와 워드마크를 확인했다. PC에서 로그인 후 통화 목록 이동과 로그아웃을 확인했다. 모바일에서 로그인 실패와 시도 제한 시 폼 안내가 표시되는 것을 확인했다. 홈서버와 모바일 실기기 검증은 후속 작업이다. [인증 통합 검사](../tests/p2/test_ingestion.py)
 
 - **전체 재검증(2026-11-24)** — `python scripts/check.py`(하네스 7개)와 `python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3`를 다시 실행했다. 하네스 7개·P1 3개·P2 18개·P3 70개, 총 98개가 skip 없이 통과했고 임시 클러스터는 정리됐다. 11-19에 HTTP 503으로 한 번 실패했던 기존 큐 검사 2개는 이번 실행에서 재현되지 않았으나 실패 원인은 확인하지 못했다. `python -m unittest discover -s ai-worker/tests`는 시스템 Python(Pydantic 2 설치)에서 12개(전사 8·분석 4)가 통과했다. 서버용 `.venv`에는 Pydantic이 없어 분석 테스트 가져오기에서 실패한다. Linux·실기기·실제 모델·원격 CI는 확인하지 않았다.
 

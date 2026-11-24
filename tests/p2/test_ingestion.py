@@ -11,6 +11,19 @@ from tests.support import ProductCase
 
 
 class IngestionTests(ProductCase):
+    def test_login_page_assets_are_public_before_sign_in(self):
+        page = self.http('GET', '/login')
+        for path, content_type in (('/task-assets/tasks.css', 'text/css'), ('/task-assets/wave.svg', 'image/svg+xml')):
+            with self.subTest(path=path):
+                self.assertIn(f'"{path}"', page.text)
+                response = self.http('GET', path)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers['content-type'].split(';')[0], content_type)
+                self.assertTrue(response.content)
+                self.assertEqual(self.http('HEAD', path).status_code, 200)
+                self.assertEqual(self.http('POST', path).status_code, 401)
+        self.assertEqual(self.http('GET', '/task-assets/tasks.js').status_code, 401)
+
     def test_browser_login_accepts_multipart_and_limits_request_body(self):
         page = self.http('GET', '/login')
         cookie = page.headers['set-cookie'].lower()
@@ -30,13 +43,33 @@ class IngestionTests(ProductCase):
         import re
         page = self.http('GET', '/login')
         csrf = re.search(r'name="csrf" value="([^"]+)"', page.text)[1]
-        self.assertEqual(self.http('POST', '/login', data={'username': 'owner', 'password': 'test-password'}).status_code, 403)
-        for _ in range(5):
-            response = self.http('POST', '/login', data={'csrf': csrf, 'username': '다른 사용자', 'password': 'test-password'})
+        valid = {'csrf': csrf, 'username': 'owner', 'password': 'test-password'}
+        wrong_user = {**valid, 'username': '다른 사용자'}
+        browser = {'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8'}
+        self.assertEqual(self.http('POST', '/login', headers=browser, data={**valid, 'csrf': ''}).status_code, 403)
+        response = self.http('POST', '/login', data=wrong_user)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {'error': 'LOGIN_FAILED'})
+        for _ in range(4):
+            response = self.http('POST', '/login', headers=browser, data=wrong_user)
             self.assertEqual(response.status_code, 401)
-        self.assertEqual(self.http('POST', '/login', data={'csrf': csrf, 'username': 'owner', 'password': 'test-password'}).status_code, 429)
+        self.assertTrue(response.headers['content-type'].startswith('text/html'))
+        self.assertIn('사용자 이름 또는 비밀번호를 확인해 주세요.', response.text)
+        self.assertIn(f'name="csrf" value="{csrf}"', response.text)
+        self.assertNotIn('test-password', response.text)
+
+        response = self.http('POST', '/login', headers=browser, data=valid)
+        self.assertEqual(response.status_code, 429)
+        self.assertTrue(response.headers['content-type'].startswith('text/html'))
+        self.assertIn('로그인 시도가 너무 많습니다.', response.text)
+        self.assertIn(f'name="csrf" value="{csrf}"', response.text)
+        response = self.http('POST', '/login', headers={'Accept': 'text/html;q=0,*/*;q=0.8'}, data=valid)
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json(), {'error': 'LOGIN_THROTTLED'})
         self.advance(minutes=5)
-        self.login()
+        response = self.http('POST', '/login', headers=browser, data=valid)
+        self.assertEqual((response.status_code, response.headers['location']), (302, '/'))
+        self.assertEqual(self.http('GET', '/').status_code, 200)
 
     def test_auth_csrf_audio_logout_and_session_expiry(self):
         recording = self.ingest()

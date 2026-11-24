@@ -12,6 +12,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 from starlette.templating import Jinja2Templates
+from werkzeug.datastructures import MIMEAccept
+from werkzeug.http import parse_accept_header
 from werkzeug.security import check_password_hash
 
 from ..common import digest
@@ -19,12 +21,24 @@ from ..common import digest
 
 SESSION_AGE = timedelta(hours=8)
 FORM_MAX_SIZE = 16384
+LOGIN_ASSETS = ('/task-assets/tasks.css', '/task-assets/wave.svg')
 TEMPLATES = Jinja2Templates(directory=Path(__file__).with_name('templates'))
 
 
 def csrf_matches(expected, form):
     actual = form.get('csrf', '')
     return bool(expected) and hmac.compare_digest(expected.encode(), actual.encode())
+
+
+def login_error(request, error, status_code):
+    accept = parse_accept_header(request.headers.get('accept'), MIMEAccept)
+    headers = {'Vary': 'Accept'}
+    if accept.best_match(('application/json', 'text/html')) == 'text/html':
+        return TEMPLATES.TemplateResponse(
+            request, 'login.html', {'csrf': request.session['login_csrf'], 'error': error},
+            status_code=status_code, headers=headers,
+        )
+    return JSONResponse({'error': error}, status_code=status_code, headers=headers)
 
 
 def authenticate(app, *, service, workers):
@@ -42,6 +56,9 @@ def authenticate(app, *, service, workers):
             if not matches:
                 return PlainTextResponse('Unauthorized', status_code=401)
             request.state.worker = matches[0]
+            return None
+
+        if request.method in ('GET', 'HEAD') and path in LOGIN_ASSETS:
             return None
 
         if path != '/login':
@@ -93,24 +110,28 @@ def routes(service, owner, password_hash):
         form = request.state.form
         if not csrf_matches(session.get('login_csrf'), form):
             raise HTTPException(403)
+        error = None
         with service.transaction() as conn:
             now = service.clock()
             conn.execute('INSERT INTO callops.login_limits (id,retry_at) VALUES (1,%s) ON CONFLICT DO NOTHING', (now,))
             limit = conn.execute('SELECT * FROM callops.login_limits WHERE id=1 FOR UPDATE').fetchone()
             if limit['failures'] >= 5 and limit['retry_at'] > now:
-                return JSONResponse({'error': 'LOGIN_THROTTLED'}, status_code=429)
-            correct_password = check_password_hash(password_hash, form.get('password', ''))
-            if not correct_password or not hmac.compare_digest(owner.encode(), form.get('username', '').encode()):
+                error = ('LOGIN_THROTTLED', 429)
+            elif (not check_password_hash(password_hash, form.get('password', ''))
+                  or not hmac.compare_digest(owner.encode(), form.get('username', '').encode())):
                 failures = limit['failures'] + 1
                 conn.execute('UPDATE callops.login_limits SET failures=%s,retry_at=%s WHERE id=1',
                              (failures, now + timedelta(minutes=5) if failures >= 5 else now))
-                return JSONResponse({'error': 'LOGIN_FAILED'}, status_code=401)
-            conn.execute('UPDATE callops.login_limits SET failures=0,retry_at=%s WHERE id=1', (now,))
-            if session.get('token'):
-                conn.execute('DELETE FROM callops.sessions WHERE token_hash=%s', (digest(session['token'].encode()),))
-            conn.execute('DELETE FROM callops.sessions WHERE expires_at<=%s', (now,))
-            token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
-            conn.execute('INSERT INTO callops.sessions VALUES (%s,%s,%s)', (digest(token.encode()), csrf, now + SESSION_AGE))
+                error = ('LOGIN_FAILED', 401)
+            else:
+                conn.execute('UPDATE callops.login_limits SET failures=0,retry_at=%s WHERE id=1', (now,))
+                if session.get('token'):
+                    conn.execute('DELETE FROM callops.sessions WHERE token_hash=%s', (digest(session['token'].encode()),))
+                conn.execute('DELETE FROM callops.sessions WHERE expires_at<=%s', (now,))
+                token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+                conn.execute('INSERT INTO callops.sessions VALUES (%s,%s,%s)', (digest(token.encode()), csrf, now + SESSION_AGE))
+        if error is not None:
+            return login_error(request, *error)
         session.clear()
         session['token'] = token
         return RedirectResponse('/', status_code=302)

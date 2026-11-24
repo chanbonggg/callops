@@ -17,7 +17,7 @@ python scripts/check.py --phase P3
 
 `--phase P2`는 기본 검사와 P1·P2를 함께 실행한다. 단계 테스트가 없거나 skip/expectedFailure가 있으면 실패한다. P1~P3는 실제 테스트 DB가 필요하다. P1 DB 테스트는 빈 테스트 DB를 전제로 하므로 재실행 때 새 클러스터를 준비한다. [P2/P3 재현 명령](p2-p3-server.md)을 사용한다. 기본 검사의 녹색 결과를 기능 완료로 해석하지 않는다.
 
-현재 검증은 Windows PostgreSQL 18.0 임시 클러스터에서 수행한다(2026-11-24 기준 하네스 7·P1 3·P2 18·P3 70, 총 98개 통과. Linux·배포 환경은 미검증). 데스크톱 AI 모듈의 모의 테스트는 `python -m unittest discover -s ai-worker/tests -v`로 별도 실행하며 분석 테스트에는 Pydantic 2가 필요하다. 서버용 `.venv`에는 Pydantic이 없어 이 명령이 분석 테스트 가져오기에서 실패할 수 있다. 미리 준비한 빈 전용 PostgreSQL을 사용할 때는 `python scripts/test_postgres.py --service --phase P3`를 쓸 수 있다. GitHub Actions 워크플로는 저장소에 구성되어 있지 않다.
+현재 검증은 Windows PostgreSQL 18.0 임시 클러스터에서 수행한다(2026-11-24 기준 하네스 7·P1 3·P2 19·P3 70, 총 99개 통과. Linux·배포 환경은 미검증). 데스크톱 AI 모듈의 모의 테스트는 `python -m unittest discover -s ai-worker/tests -v`로 별도 실행하며 분석 테스트에는 Pydantic 2가 필요하다. 서버용 `.venv`에는 Pydantic이 없어 이 명령이 분석 테스트 가져오기에서 실패할 수 있다. 미리 준비한 빈 전용 PostgreSQL을 사용할 때는 `python scripts/test_postgres.py --service --phase P3`를 쓸 수 있다. GitHub Actions 워크플로는 저장소에 구성되어 있지 않다.
 
 ## 파일의 역할
 
