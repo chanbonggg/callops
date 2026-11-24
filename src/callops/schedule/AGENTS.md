@@ -21,3 +21,4 @@
 - 연결 일정 상세·편집·충돌 화면은 `routes.py`와 `templates/linked.html`에 있다. 조회는 상태를 바꾸지 않는다. 수정과 가져오기 및 충돌 해결은 JSON API와 동일한 동기화 서비스에 두 버전을 전달한다. 편집 중 원격만 바뀐 경우 아직 저장하지 않은 입력을 비교 값으로 사용한다. [연결 일정 웹 화면](../../../docs/p2-p3-server.md#연결-일정-웹-화면)
 - 모의 양방향 쓰기는 `Service.transaction()`에서 원자적으로 처리한다. 실제 Google 연동의 승인·권한·재조회는 제품 계약을 따른다. [프로젝트 계획](../../../docs/01-project.md#f07-승인-기반-calendar-등록삼성-캘린더-표시)
 - 승인 revision 경합, 이중 요청, 응답 유실 전후, 사적 전환과 시작 시각 경계를 실제 DB에서 시험한다. [일정 테스트](../../../tests/p3/test_schedule_candidates.py) · [승인 스키마](../../../migrations/004_schedule_candidates.sql) · [모의 전송 스키마](../../../migrations/005_mock_calendar.sql)
+- 연결 일정의 양쪽 수정·삭제, 동시 변경 충돌, 연결 당시 합의 보존은 [동기화 테스트](../../../tests/p3/test_calendar_sync.py)에서 확인한다. 스키마는 [012](../../../migrations/012_mock_calendar_sync.sql)이다. 실제 Google·n8n 경로는 아직 없다.

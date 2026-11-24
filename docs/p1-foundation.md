@@ -51,9 +51,10 @@ python scripts/manage.py check
 - [009_manual_tasks.sql](../migrations/009_manual_tasks.sql)은 직접 입력 할 일의 기한·상태·revision과 등록 재시도 방지 키를 저장할 `tasks` 테이블을 추가한다.
 - [010_call_task_candidates.sql](../migrations/010_call_task_candidates.sql)은 통화·분석 작업·입력 전사에 연결된 할 일 후보를 저장하고, 기존 할 일에 통화 출처와 취소 상태를 추가한다.
 - [011_retention_cleanup.sql](../migrations/011_retention_cleanup.sql)은 통화 전체 삭제와 별도로 원음과 전사·분석 파일의 청소 상태를 저장한다. 기존 행은 `NONE`에서 시작하며 서비스가 기한에 따라 청소 대상으로 전환한다.
+- [012_mock_calendar_sync.sql](../migrations/012_mock_calendar_sync.sql)은 모의 Calendar의 연결 일정 양방향 동기화(원격 버전, 연결 당시 합의 스냅샷, 삭제 상태)를 저장한다. 앱이 시작하려면 012까지 적용해야 한다.
 
 ## 검증 대상
 
 설정 누락/잘못된 계정/원격 비암호화 연결/저장소 내부 경로 거부, 비밀값 repr 제외, 미적용 DB readiness 실패, 빈 DB 적용·재실행, 앱 DML 및 DDL 차단, 잘못된 계정의 migration 거부, SQL 오류 롤백, 적용 파일 변조 거부를 시험한다. 실제 수집·세션 인증·동시 claim은 P2/P3에서 검증한다.
 
-로컬 결과: Python 3.12.4 / psycopg 3.3.3 / PostgreSQL 18.0에서 `python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin` 실행, 하네스 6개·P1 3개 테스트 통과. 테스트 후 임시 서버 종료·정리 완료. 현재 저장소에는 GitHub Actions 워크플로가 없으며 원격 CI 검증은 하지 않았다.
+로컬 결과(최초, 2026-09): Python 3.12.4 / psycopg 3.3.3 / PostgreSQL 18.0에서 `python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin` 실행, 하네스 6개·P1 3개 테스트 통과. 현재 하네스는 7개이며 P1은 012 마이그레이션까지 포함해 같은 3개로 통과한다(2026-11-24 `--phase P3` 전체 98개 실행에서 확인, [진행 기록](progress-checklist.md#검증과-git-상태)). 테스트 후 임시 서버 종료·정리 완료. 현재 저장소에는 GitHub Actions 워크플로가 없으며 원격 CI 검증은 하지 않았다.

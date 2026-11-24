@@ -4,7 +4,7 @@
 
 ## 실행 환경
 
-Python 3.12와 [requirements.txt](../requirements.txt)의 psycopg·Starlette·Uvicorn을 사용한다. 인증, 통화 관리, 워커 API는 한 ASGI 앱에 등록하고 Jinja로 브라우저 화면을 렌더링한다. DB 준비와 역할 분리는 [P1 안내](p1-foundation.md)를 따른다. `011_retention_cleanup.sql`까지 명시적으로 마이그레이션해야 앱이 시작된다.
+Python 3.12와 [requirements.txt](../requirements.txt)의 psycopg·Starlette·Uvicorn을 사용한다. 인증, 통화 관리, 워커 API는 한 ASGI 앱에 등록하고 Jinja로 브라우저 화면을 렌더링한다. DB 준비와 역할 분리는 [P1 안내](p1-foundation.md)를 따른다. `012_mock_calendar_sync.sql`까지 명시적으로 마이그레이션해야 앱이 시작된다.
 
 ```text
 python -m pip install -r requirements.txt
@@ -202,7 +202,7 @@ worker.once(events=[{
 
 전사 근거가 만료되면 현재 일정은 남고 합의 상세·근거 링크·신규 전송은 차단된다. 통화 전체 삭제나 사적 전환 시 일정의 제목·시각·원본 연결을 지운다. 이미 생성된 이벤트의 중복 방지를 위해 일정 ID와 전송 식별 기록을 유지한다.
 
-이 경로는 로컬 PostgreSQL의 모의 제공자를 사용한다. 실제 Google Calendar와 OAuth는 후속 범위다. 직접 입력 할 일은 [별도 화면](#직접-입력-할-일-화면)에서 관리하며 통화에서 나온 할 일의 승인·연결은 [진행 체크리스트](progress-checklist.md#3-통화에서-나온-할-일-승인)에서 관리한다.
+이 경로는 로컬 PostgreSQL의 모의 제공자를 사용한다. 실제 Google Calendar와 OAuth는 후속 범위다. 직접 입력 할 일은 [별도 화면](#직접-입력-할-일-화면)에서 관리하며 통화에서 나온 할 일의 승인·연결은 [할 일 후보 검토](#통화에서-나온-할-일-후보-검토)에 있다. 구현 이력은 [진행 체크리스트](progress-checklist.md#4-통화에서-나온-할-일-승인)에서 관리한다.
 
 #### 연결 일정 양방향 동기화 API
 
@@ -263,9 +263,11 @@ HTML 폼과 아래 JSON API는 같은 입력 검증과 저장 함수를 쓴다. 
 | `POST /api/tasks/{id}` | `action=complete`, `revision` | 200. `OPEN`을 `DONE`으로 바꾸고 완료 시각 기록 및 revision 증가 |
 | `POST /api/tasks/{id}` | `action=delete`, `revision` | 204. 내용 삭제. 같은 삭제 요청의 재전송도 204 |
 
-오래된 revision, 이미 완료한 항목의 재완료, 다른 내용으로 사용한 등록 키는 409로 거부한다. 없는 항목은 404를 반환한다. 삭제된 항목의 제목·기한·상태·완료 시각을 비우고 ID·등록 키·revision·삭제 시각을 보존해 지연된 등록 재시도를 막는다. 통화 후보 연결과 보관 만료는 후속 단계다. [마이그레이션](../migrations/009_manual_tasks.sql) · [화면·API 검증](../tests/p3/test_tasks.py)
+오래된 revision, 이미 완료한 항목의 재완료, 다른 내용으로 사용한 등록 키는 409로 거부한다. 없는 항목은 404를 반환한다. 삭제된 항목의 제목·기한·상태·완료 시각을 비우고 ID·등록 키·revision·삭제 시각을 보존해 지연된 등록 재시도를 막는다. 통화 후보 연결은 `010`, 통화 전체 삭제·근거 만료의 정리는 `011`과 [할 일 후보 검토](#통화에서-나온-할-일-후보-검토)에서 다룬다. 승인된 할 일 자체의 보관·연장 정책(OPEN 365일 등)은 아직 구현하지 않았다. [마이그레이션](../migrations/009_manual_tasks.sql) · [화면·API 검증](../tests/p3/test_tasks.py) · [후보 검증](../tests/p3/test_task_candidates.py)
 
 ## 확인 범위
+
+**최신(2026-11-24)** — Windows PostgreSQL 18.0 임시 클러스터에서 `python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3`를 다시 실행해 하네스 7개·P1 3개·P2 18개·P3 70개, 총 98개가 skip 없이 통과했다. 012 마이그레이션과 연결 일정 동기화, 만료 정리, 할 일 후보, 질문 화면을 포함한다. 2026-11-19에 한 번 HTTP 503으로 실패했던 기존 큐 검사 2개는 이번 전체 실행에서 재현되지 않았지만 원인은 확인하지 못했다. 아래는 당시 시점의 기록이며 개수와 범위는 그때 기준이다.
 
 2026-11-11 전사 검색 추가 후 하네스·P1~P3 46개를 통과했다. 임시 데이터로 로컬 HTTPS에서 수신·업무 승인·가짜 워커 처리 후 전사 검색과 고정 근거 링크를 확인했다.
 

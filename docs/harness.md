@@ -17,7 +17,7 @@ python scripts/check.py --phase P3
 
 `--phase P2`는 기본 검사와 P1·P2를 함께 실행한다. 단계 테스트가 없거나 skip/expectedFailure가 있으면 실패한다. P1~P3는 실제 테스트 DB가 필요하다. P1 DB 테스트는 빈 테스트 DB를 전제로 하므로 재실행 때 새 클러스터를 준비한다. [P2/P3 재현 명령](p2-p3-server.md)을 사용한다. 기본 검사의 녹색 결과를 기능 완료로 해석하지 않는다.
 
-현재 검증은 Windows PostgreSQL 18.0 임시 클러스터에서 수행한다. 미리 준비한 빈 전용 PostgreSQL을 사용할 때는 `python scripts/test_postgres.py --service --phase P3`를 쓸 수 있다. GitHub Actions 워크플로는 저장소에 구성되어 있지 않다.
+현재 검증은 Windows PostgreSQL 18.0 임시 클러스터에서 수행한다(2026-11-24 기준 하네스 7·P1 3·P2 18·P3 70, 총 98개 통과. Linux·배포 환경은 미검증). 데스크톱 AI 모듈의 모의 테스트는 `python -m unittest discover -s ai-worker/tests -v`로 별도 실행하며 분석 테스트에는 Pydantic 2가 필요하다. 서버용 `.venv`에는 Pydantic이 없어 이 명령이 분석 테스트 가져오기에서 실패할 수 있다. 미리 준비한 빈 전용 PostgreSQL을 사용할 때는 `python scripts/test_postgres.py --service --phase P3`를 쓸 수 있다. GitHub Actions 워크플로는 저장소에 구성되어 있지 않다.
 
 ## 파일의 역할
 
@@ -44,7 +44,19 @@ python scripts/check.py --phase P3
 | P2 | 미인증/CSRF 차단, 부분 파일·형식 위장·경로 탈출 거부, T04 AI 호출 0회, 중복 수신, 만료/사적 선택 후 사본 청소 | 임시 디렉터리, 테스트 DB, 제어 가능한 시계, 호출 관찰용 mock |
 | P3 | 두 DB 연결의 동시 claim, 구 임대 거부, 준비 중 heartbeat, 결과 준비 보고·ACK 유실의 멱등성, 실행/업로드 기한 분리, 원음·산출물 만료와 취소 후 청소·복구 | 실제 PostgreSQL 큐/API, 결정적인 가짜 워커 |
 
-가짜 워커는 P3의 **실제 API**를 호출하고 합성 결과만 반환한다. Starlette ASGI 테스트 클라이언트와 실제 PostgreSQL로 인증·상태·파일 경로를 실행하며 대체 상태 머신을 만들지 않는다. Google/n8n 어댑터는 아직 없으며 도입할 때 `Mock`으로 요청 횟수와 승인 스냅샷을 검사한다. 만료 검증은 주입한 시계를 사용한다.
+`--phase P3`는 큐뿐 아니라 이후 추가한 서버 기능의 통합 테스트도 `tests/p3/`에서 실행한다. 파일별 범위는 아래와 같다. 제품 계약의 P4~P8 단계 이름과는 별개의 실행 묶음이다.
+
+| `tests/p3/` 파일 | 확인 범위 |
+|---|---|
+| `test_queue.py` | 큐·임대·기한·ACK·취소 청소 |
+| `test_audio_formats.py` | 형식별 수신·호환 재생 |
+| `test_transcript_views.py` | 합성 전사·요약, 인용 재생, 전사 검색, 근거 검색, 통화 질문 |
+| `test_schedule_candidates.py` | 일정 후보 검토, 직접 입력 일정, 월간 캘린더, 모의 전송 |
+| `test_calendar_sync.py` | 연결 일정 양방향 동기화·충돌 해결 |
+| `test_tasks.py`, `test_task_candidates.py` | 직접 입력 할 일, 통화 할 일 후보 |
+| `test_retention.py` | 30일·90일 만료와 부분 청소 |
+
+가짜 워커는 P3의 **실제 API**를 호출하고 합성 결과만 반환한다. Starlette ASGI 테스트 클라이언트와 실제 PostgreSQL로 인증·상태·파일 경로를 실행하며 대체 상태 머신을 만들지 않는다. Calendar는 PostgreSQL에 저장하는 모의 제공자(`schedule/calendar.py`)로만 검증한다. 실제 Google/n8n 어댑터는 아직 없으며 도입할 때 `Mock`으로 요청 횟수와 승인 스냅샷을 검사한다. 만료 검증은 주입한 시계를 사용한다.
 
 시험용 DB는 별도 이름·계정으로 구성하고 테스트 설정을 명시적으로 지정한다. 일반 `DATABASE_URL`이나 운영 `.env`를 자동 로드하지 않는다. DB가 없으면 단계 검사는 실패해야 한다. 데이터 초기화 코드는 테스트 대상 확인 없이 DROP/TRUNCATE하지 않는다.
 
