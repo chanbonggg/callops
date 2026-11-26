@@ -15,6 +15,9 @@ import time
 from app.worker_io import MAX_RESULT, WorkerError, json_bytes, publish, sync_directory
 
 
+RAG_STAGES = ('RAG_EMBED', 'RAG_ANSWER')
+
+
 def live_group(group):
     try:
         os.killpg(group, 0)
@@ -42,7 +45,7 @@ def stop_group(process, grace=30):
 class StageProcess:
     def __init__(self, guard, model, ollama_models, speakers=None):
         self.guard = guard
-        self.model = model.expanduser().resolve()
+        self.model = model.expanduser().resolve() if model is not None else None
         self.ollama_models = ollama_models.expanduser().resolve()
         self.speakers = tuple(path.expanduser().resolve() for path in speakers) if speakers else ()
 
@@ -54,16 +57,20 @@ class StageProcess:
             cuda_devices = get_cuda_device_count()
         except RuntimeError:
             raise WorkerError('MODELS_NOT_READY') from None
-        if (not (self.model / 'model.bin').is_file() or any(not path.is_file() for path in self.speakers)
+        if (self.model is None or not (self.model / 'model.bin').is_file()
+                or any(not path.is_file() for path in self.speakers)
                 or not manifest.is_file() or shutil.which('ollama') is None or cuda_devices < 1):
             raise WorkerError('MODELS_NOT_READY')
 
     def run(self, job, directory, check):
-        args = [sys.executable, '-m', 'app.worker_engine', job['stage'], str(directory),
-                '--whisper-model', str(self.model), '--ollama-models', str(self.ollama_models)]
-        if self.speakers:
-            args.extend(('--two-speaker-models', *(str(path) for path in self.speakers)))
-        if job['stage'] == 'ANALYSIS' and job.get('call_time_trusted') is True and job.get('call_started_at'):
+        stage = job['stage']
+        args = [sys.executable, '-m', 'app.worker_engine', stage, str(directory),
+                '--ollama-models', str(self.ollama_models)]
+        if stage == 'STT' and self.model is not None:
+            args.extend(('--whisper-model', str(self.model)))
+            if self.speakers:
+                args.extend(('--two-speaker-models', *(str(path) for path in self.speakers)))
+        if stage == 'ANALYSIS' and job.get('call_time_trusted') is True and job.get('call_started_at'):
             args.extend(('--call-started-at', job['call_started_at']))
         # Give child engines only runtime paths. In particular they never get the CallOps token.
         names = ('PATH', 'LANG', 'LC_ALL', 'HOME', 'USER', 'LD_LIBRARY_PATH', 'PYTHONPATH', 'CUDA_VISIBLE_DEVICES')
@@ -98,9 +105,12 @@ class StageProcess:
                 data = stream.read(MAX_RESULT + 1)
             if len(data) > MAX_RESULT:
                 raise ValueError
-            return json.loads(data)
+            result = json.loads(data)
         except (OSError, ValueError, RecursionError):
             raise WorkerError('MODEL_ERROR') from None
+        check()
+        return result
+
 
 def transcript_payload(result):
     labels = {item['segment_id']: item['speaker'] for item in result.get('segment_speakers', ())}
@@ -169,6 +179,12 @@ def local_ollama(models):
             process.wait(timeout=5)
 
 
+def require_gpu_model(client, name):
+    loaded = client.ps().models
+    if not any(item.model == name and item.size and item.size_vram and item.size_vram >= item.size for item in loaded):
+        raise RuntimeError('Model was not fully GPU-resident')
+
+
 def run_analysis(source, call_started_at, models):
     from app.analyzer import MODEL_NAME, PROMPT_VERSION, analyze_transcript, local_client
     from app.schemas import Transcript
@@ -183,21 +199,54 @@ def run_analysis(source, call_started_at, models):
     with local_ollama(models) as port:
         result = analyze_transcript(transcript, port=port).result
         with local_client(port, 3) as client:
-            loaded = client.ps().models
-        if not any(item.model == MODEL_NAME and item.size_vram and item.size_vram >= item.size for item in loaded):
-            raise RuntimeError('Qwen was not fully GPU-resident')
+            require_gpu_model(client, MODEL_NAME)
     return analysis_payload(result, model=MODEL_NAME, prompt=PROMPT_VERSION, elapsed=time.monotonic() - started)
 
 
-def main():
+def run_rag(stage, source, models):
+    from app import rag
+    from app.analyzer import MODEL_DIGEST, MODEL_NAME, local_client
+
+    with source.open('rb') as stream:
+        raw = stream.read(rag.MAX_INPUT_BYTES + 1)
+    if len(raw) > rag.MAX_INPUT_BYTES:
+        raise ValueError('RAG input exceeds its size limit')
+    embedding = stage == 'RAG_EMBED'
+    if embedding:
+        request = rag.EmbeddingRequest.model_validate_json(raw)
+        name, digest = rag.EMBED_MODEL, rag.EMBED_DIGEST
+        data = {'dimensions': rag.EMBED_DIMENSIONS}
+    else:
+        request = rag.AnswerRequest.model_validate_json(raw)
+        name, digest = MODEL_NAME, MODEL_DIGEST
+        data = {'prompt_version': rag.PROMPT_VERSION}
+        if not request.evidence:
+            return dict(data, schema_version=1, model_name=None, model_digest=None,
+                        **rag.no_evidence_answer().model_dump())
+    with local_ollama(models) as port, local_client(port, 60) as client:
+        if not any(item.model == name and item.digest == digest for item in client.list().models):
+            raise ValueError('Local model differs from the validated model')
+        if embedding:
+            data['embeddings'] = rag.embed_texts(client, request.texts, keep_alive=60)
+        else:
+            answer = rag.generate_answer(client, request.question, request.scope.model_dump(mode='json', exclude_none=True),
+                                         [row.prompt_row() for row in request.evidence], rag.load_prompts())
+            data.update(answer.model_dump())
+        require_gpu_model(client, name)
+    return dict(data, schema_version=1, model_name=name, model_digest=digest)
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('stage', choices=('STT', 'ANALYSIS'))
+    parser.add_argument('stage', choices=('STT', 'ANALYSIS', *RAG_STAGES))
     parser.add_argument('directory', type=Path)
-    parser.add_argument('--whisper-model', type=Path, required=True)
+    parser.add_argument('--whisper-model', type=Path)
     parser.add_argument('--ollama-models', type=Path, required=True)
     parser.add_argument('--two-speaker-models', nargs=2, type=Path)
     parser.add_argument('--call-started-at')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.stage == 'STT' and args.whisper_model is None:
+        parser.error('--whisper-model is required for STT')
     try:
         source = args.directory / 'input'
         if args.stage == 'STT':
@@ -206,8 +255,10 @@ def main():
             result = transcribe_file(source, model_name=str(args.whisper_model),
                                      two_speaker_models=args.two_speaker_models, preserve_voice_intervals=True)
             data = transcript_payload(result)
-        else:
+        elif args.stage == 'ANALYSIS':
             data = run_analysis(source, args.call_started_at, args.ollama_models)
+        else:
+            data = run_rag(args.stage, source, args.ollama_models)
         publish(args.directory / 'result.json', json_bytes(data))
     except (Exception, KeyboardInterrupt):
         return 1

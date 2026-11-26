@@ -12,14 +12,13 @@ import time
 
 import httpx
 
-from app.analyzer import MODEL_NAME, AnalysisFailure, analysis_settings, analyze_transcript, local_client
+from app.analyzer import MODEL_DIGEST, MODEL_NAME, AnalysisFailure, analysis_settings, analyze_transcript, local_client
 from app.schemas import Transcript
 
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "scenarios.json"
 EDGES = FIXTURE.with_name("d4-analysis-edges.json")
 OLLAMA_VERSION = "0.34.2"
-MODEL_DIGEST = "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
 QUANTIZATION = "Q4_K_M"
 FIRST_CASES = ("T01", "T06", "T09")
 SPLIT_CASES = {"T06": 1, "T08": 1, "T09": 1, "T10": 2}

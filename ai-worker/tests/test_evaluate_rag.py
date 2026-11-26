@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import evaluate_rag
+from app.rag import RagPrompts
 
 
 def model_response(payload):
@@ -20,7 +21,7 @@ def model_response(payload):
 
 class RagEvaluationTests(unittest.TestCase):
     def setUp(self):
-        self.prompts = evaluate_rag.RagPrompts(answer="답변", review="근거 검토", evidence="확정 수치 판단")
+        self.prompts = RagPrompts(answer="답변", review="근거 검토", evidence="확정 수치 판단")
         self.calls = [
             {
                 "id": call_id, "counterparty": name, "call_started_at": "2031-04-02T23:30:00Z",

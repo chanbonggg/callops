@@ -86,7 +86,7 @@ python -m app.evaluate_analysis T06 T09 --mode long --port 11435 --repeat 3
 
 ## D4 검색 평가
 
-클라우드를 끈 시험 Ollama의 캐시에 `bge-m3:567m`과 추출에 사용한 `qwen3:8b`를 준비한다. BGE-M3가 없으면 쓰기 가능한 시험 캐시를 사용하는 서버에 `OLLAMA_HOST=127.0.0.1:11435 ollama pull bge-m3:567m`으로 받아 둔다. 개발 세트에서 검색 조각 크기를 비교할 수 있다. 최종 명령은 개발 보고서의 모델 digest·평가 코드·프롬프트·스키마·검색 설정이 현재 실행과 일치하는지 확인한다. [Ollama BGE-M3](https://ollama.com/library/bge-m3:567m)
+클라우드를 끈 시험 Ollama의 캐시에 `bge-m3:567m`과 추출에 사용한 `qwen3:8b`를 준비한다. BGE-M3가 없으면 쓰기 가능한 시험 캐시를 사용하는 서버에 `OLLAMA_HOST=127.0.0.1:11435 ollama pull bge-m3:567m`으로 받아 둔다. 개발 세트에서 검색 조각 크기를 비교할 수 있다. 최종 명령은 개발 보고서의 모델 digest·평가 및 공용 모델 코드·프롬프트·스키마·검색 설정이 현재 실행과 일치하는지 확인한다. 최종 평가 전 현재 코드로 개발 보고서를 생성한다. [Ollama BGE-M3](https://ollama.com/library/bge-m3:567m)
 
 ```bash
 umask 077
@@ -100,6 +100,33 @@ python -m app.evaluate_rag final --window-segments 2 --port 11435 \
 상대와 한국 날짜로 좁힌 합성 통화에서 찾은 발화를 Qwen이 읽고 초안의 사실과 인용을 한 번 더 대조한다. 초안의 인용 ID가 유효하지 않으면 검색된 ID만 허용해 한 번 재시도한다. 합의된 수치를 묻고 원문에 미확정 표현이 있으면 답변 가능 여부를 먼저 판단하고, 보류 사유에는 근거 발화를 직접 인용한다.
 
 JSONL에서 답변 가능 문항의 필요한 ID가 상위 5개 조각에 모두 들었는지 확인한다. 각 답변의 시각·물량·주체·최종 합의와 보류 사유는 근거에 직접 대조한다. [웹 MVP 평가 기준](../docs/web-mvp/README.md#week-05-평가-기준) · [첫 고정 평가](../docs/02-desktop.md#2026-11-24-d4-검색-평가) · [재평가 결과](../docs/02-desktop.md#2026-11-25-d4-검색-재평가)
+
+## 질문 모델 워커 실행
+
+`StageProcess.run()`이 기존 D5 프로세스 그룹에서 `RAG_EMBED`와 `RAG_ANSWER`를 실행한다. 호출자는 같은 워커 루트의 잠금을 잡고, 관리 작업 디렉터리의 `input`에 UTF-8 JSON을 둔다. 실행 기한과 취소를 검사하는 함수를 넘기며, 성공 결과는 `result.json`에 원자적으로 기록된다. 호출자가 결과 사용 후 작업 사본을 청소하고, 엔진 종료를 확인하지 못한 경우에는 기존 `engine-active` 복구 절차를 따른다. 입력과 결과 파일을 사용자 전용으로 관리한다.
+
+| 실행 단계 | 입력 | 결과 |
+| --- | --- | --- |
+| `RAG_EMBED` | `schema_version: 1`, `texts` 1~16개. 공백 제거 후 항목마다 UTF-8 4KiB까지 받는다. 질문과 전사 조각은 같은 모델에 입력한다. | `schema_version`, `model_name`, `model_digest`, `dimensions`(1024), `embeddings`. 입력 순서대로 유한한 단위 벡터를 반환한다. 잘린 입력이나 일부 벡터만 성공한 배치는 실패한다. |
+| `RAG_ANSWER` | `schema_version: 1`, `question` 1~200자, 선택 `scope`, 검색된 `evidence` 0~10개. `scope`의 `counterparty`는 최대 100자이고 `from_date`·`to_date`는 `YYYY-MM-DD`다. | `schema_version`, `model_name`, `model_digest`, `prompt_version`, `answer`, `reason`, `segment_ids`. 답변과 보류 사유 중 하나만 채운다. 근거가 비면 모델을 시작하지 않고 모델명·digest가 `null`인 보류를 반환한다. |
+
+각 근거에 요청 내 고유 `id`, `call_id`, 원음 초 단위 `start`·`end`, `text`를 담는다. `id`와 `call_id`에는 영문·숫자·`_`·`-`·`:`를 최대 80자까지 사용한다. `speaker`는 `A`·`B`·`null`이다. `call_started_at`은 신뢰할 수 있는 오프셋 포함 ISO 8601 시각 또는 `null`이며 모델에는 한국 시각으로 전달한다. 겹치는 검색 조각의 근거는 호출자가 ID로 중복 제거한다. 예를 들어 해당 전사 버전과 구간에 매핑할 수 있는 `artifact-id:12`를 사용할 수 있다.
+
+두 단계는 80KiB를 넘는 JSON과 미정의 필드를 거부한다. 답변은 D4의 `rag-v10` 초안·인용 검토·미확정 수치 판단을 사용한다. 시스템 프롬프트와 JSON이 7168바이트를 넘으면 해당 모델 요청은 실패한다. 인용의 모든 ID가 해당 요청의 근거에 있어야 하며, 스키마 오류나 모델 실패·시간 초과 시 결과를 수락하지 않는다. 근거가 부족한 보류는 성공 응답으로 처리한다. 서버가 업무 승인·권한·고정 전사 버전·삭제·만료를 확정한 범위의 발화만 넘기는 계약이며, 결과 표시 전에도 서버에서 근거 연결과 유효성을 재검사해야 한다. 이 데스크톱 경로를 서버의 pull 큐와 질문 화면에서 호출하는 작업은 [웹 MVP 4단계](../docs/web-mvp/README.md#week-04)에서 진행한다.
+
+### WSL GPU 합성 시험
+
+D1 Python 환경과 D4에서 확인한 `bge-m3:567m`·`qwen3:8b` 캐시를 사용한다. 기본 캐시에 모델이 없으면 D4 절차로 준비한 시험 캐시를 `--ollama-models`에 지정한다. 워커가 단계별로 전용 루프백 Ollama를 시작하고 클라우드를 끈다. 모델 digest는 D4 값과 일치해야 하고, 결과 반환 전에 실행 모델의 GPU 적재를 확인한다. 시험할 때는 다른 GPU 작업이 끝난 상태에서 실행한다.
+
+```bash
+cd ~/callops/ai-worker
+source ~/callops-runtime/.venv/bin/activate
+callops_rag_root=$(mktemp -d)
+python -m app.rag_smoke --root "$callops_rag_root" \
+  --ollama-models /usr/share/ollama/.ollama/models
+```
+
+`RAG_EMBED_OK`는 입력 두 개의 1024차원 벡터를, `RAG_ANSWER_OK`는 합성 약속의 날짜·시각·장소와 제안·수락 근거 두 개를 확인했다는 뜻이다. 시험은 단계별 120초를 적용하며 복사본을 청소한 뒤 상태만 출력한다. 워커 회귀 검사는 저장소 루트에서 `python -m unittest discover -s ai-worker/tests -p test_rag_worker.py -v`로 실행한다. [범위와 완료 기준](../docs/02-desktop.md#질문-모델의-데스크톱-워커-실행)
 
 ## D5 워커 실행 — WSL 데스크톱
 

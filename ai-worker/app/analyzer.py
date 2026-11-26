@@ -17,6 +17,7 @@ from app.schemas import CallAnalysis, Event, Extraction, ReviewItem, Summary, Ta
 
 
 MODEL_NAME = "qwen3:8b"
+MODEL_DIGEST = "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
 PROMPT_VERSION = "analysis-v6"
 OPTIONS = {"temperature": 0, "num_ctx": 8192, "num_predict": 2048}
 THINK = False
