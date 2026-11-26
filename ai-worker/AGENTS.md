@@ -21,6 +21,8 @@
 
 ## 변경 시 확인
 
+- 서버 pull 루프에 질문 모델을 연결할 때는 [RAG 서버·워커 연동 계약](../docs/rag-worker-contract.md)의 버전 협상, 입력 스냅샷, spool 재전송과 ACK 형식을 적용한다.
+
 - WSL 데스크톱에서 검증한 패키지 버전과 모델 캐시 식별값은 [패키지 스냅샷](requirements-d1.txt)과 [D0~D1 기록](../docs/02-desktop.md#2026-11-21-d0d1-검증-기록)을 참고한다.
 - 실제 모델 호출을 기본 검사에 넣지 않는다. 모델 캐시·드라이버·패키지·데스크톱 연결 변경은 해당 환경의 실행 계획을 따른다. [데스크톱 계획](../docs/02-desktop.md)
 - 루트에서 `python -m unittest discover -s ai-worker/tests -v`로 전사·분석과 입력 불일치, 재시작 후 결과 재조회, 연산 기한·종료 확인을 검사한다. 모의 테스트는 D1 Python 환경에서 실행한다. 실제 GPU와 로컬 HTTPS의 합성 음성 통합 시험은 별도로 실행한다. [워커 모의 테스트](tests/test_worker.py) · [D5 실행](README.md#d5-워커-실행--wsl-데스크톱)
