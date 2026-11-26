@@ -10,7 +10,7 @@
   <a class="back" href="{{ recording_url }}"><img src="/task-assets/back.svg" width="15" height="15" alt="">통화 상세</a>
   <div class="review-heading">
     <h1>일정 후보 검토</h1>
-    <p class="hint">{{ recording.counterparty or '상대 미확인' }} · 합성 전사</p>
+    <p class="hint">{{ recording.counterparty or '상대 미확인' }}</p>
   </div>
   {% if error %}<p class="notice" role="alert">{{ error }}</p>{% endif %}
   {% for candidate in candidates %}

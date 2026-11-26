@@ -179,10 +179,11 @@ class Service:
                 row['transcript_unavailable'] = True
                 return row, None, None
             if include_summary:
-                row['summary'] = self.analysis_summary(conn, row, artifact)
+                row['analysis'] = self.analysis_result(conn, row, artifact)
+                row['summary'] = row['analysis'].get('summary') if row['analysis'] else None
             return row, artifact, result
 
-    def analysis_summary(self, conn, recording, transcript):
+    def analysis_result(self, conn, recording, transcript):
         artifact = conn.execute("""SELECT f.* FROM callops.jobs j
             JOIN callops.attempts a ON a.id=j.active_attempt
             JOIN callops.artifacts f ON f.id=a.result_artifact_id
@@ -193,11 +194,10 @@ class Service:
         if artifact is None:
             return None
         try:
-            result = self.read_result_artifact(artifact, 'ANALYSIS', recording['duration_seconds'])
+            return self.read_result_artifact(artifact, 'ANALYSIS', recording['duration_seconds'])
         except Conflict:
             # A missing or expired analysis must not hide the valid transcript.
             return None
-        return result.get('summary')
 
     def read_transcript_artifact(self, artifact, duration_seconds):
         return self.read_result_artifact(artifact, 'STT', duration_seconds)

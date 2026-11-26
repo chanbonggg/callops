@@ -1,4 +1,4 @@
-"""Persist validated synthetic candidates and review a specific revision."""
+"""Persist analysis candidates with verified evidence and review a specific revision."""
 
 import json
 import re

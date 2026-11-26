@@ -58,7 +58,7 @@
 {% elif not pinned %}
   {% if row.summary %}
   <section class="card">
-    <div class="call-heading"><h2>요약</h2><span class="count">합성 요약</span></div>
+    <div class="call-heading"><h2>{{ '요약' if row.analysis.synthetic else 'AI 요약' }}</h2>{% if row.analysis.synthetic %}<span class="count">합성 요약</span>{% endif %}</div>
     <p>{{ row.summary.text }}</p>
     <div class="call-links">
       {% for segment_id in row.summary.segment_ids %}
@@ -82,16 +82,30 @@
   {% endif %}
 {% endif %}
 
+{% if row.analysis and (row.analysis.needs_review or row.analysis.contract_mentions) %}
+<section class="card">
+  <h2>확인할 내용</h2>
+  {% for item in (row.analysis.needs_review + row.analysis.contract_mentions) %}
+  <p>{{ item.reason or item.text }}
+    {% for segment_id in item.segment_ids %}
+    <a href="{{ source }}#segment-{{ segment_id }}">근거 {{ segment_id }}</a>
+    {% endfor %}
+  </p>
+  {% endfor %}
+</section>
+{% endif %}
+
 {% if result %}
 <section class="card call-transcript{% if pinned %} call-pinned{% endif %}">
   <div class="call-heading">
     <h2>{% if pinned %}<span class="default-transcript-label">전사 구간</span><span class="target-label">선택한 근거</span>{% else %}전사{% endif %}</h2>
-    <span class="count">합성 전사</span>
+    {% if result.synthetic %}<span class="count">합성 전사</span>{% endif %}
   </div>
+  {% for warning in result.warnings %}<p class="hint">{{ transcript_warnings[warning] }}</p>{% endfor %}
   {% if result.schema_version == 2 %}
     {% for segment in result.segments %}
     <article class="call-segment" id="segment-{{ segment.segment_id }}" tabindex="-1">
-      <h3>{{ timecode(segment.start) }}–{{ timecode(segment.end) }}</h3>
+      <h3>{{ timecode(segment.start) }}–{{ timecode(segment.end) }}{% if segment.speaker %} · 화자 {{ segment.speaker }}{% endif %}</h3>
       <p>“{{ segment.text }}”</p>
       <div class="call-links">
         {% if audio_available and segment.start < segment.end %}
@@ -100,7 +114,7 @@
         <a class="button secondary" href="{{ source }}#segment-{{ segment.segment_id }}">근거 링크</a>
       </div>
     </article>
-    {% else %}<p class="hint">전사 구간이 없는 합성 결과입니다.</p>{% endfor %}
+    {% else %}{% if result.synthetic %}<p class="hint">전사 구간이 없는 합성 결과입니다.</p>{% endif %}{% endfor %}
   {% else %}
   <p class="hint">시간 구간이 없는 합성 결과</p><p>{{ result.text }}</p>
   {% endif %}

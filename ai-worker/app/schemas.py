@@ -1,173 +1,106 @@
-from typing import Literal
+"""Input and output contracts for the standalone transcript analyzer."""
 
-from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Annotated, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-
-# ---------------------------------------------------------
-# 공통
-# ---------------------------------------------------------
-
-AnalysisStatus = Literal[
-    "confirmed",
-    "proposed",
-    "cancelled",
-    "uncertain",
-]
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
-class Evidence(BaseModel):
-    """
-    분석 결과가 전사본의 어느 segment를 근거로 했는지 기록한다.
-    """
-
-    segment_ids: list[int] = Field(
-        min_length=1,
-        description="해당 판단의 근거가 된 전사 segment ID 목록",
-    )
+SegmentID = Annotated[int, Field(gt=0)]
+Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+Title = Annotated[Text, Field(max_length=160)]
+Speaker = Literal["A", "B"]
+AnalysisStatus = Literal["confirmed", "proposed", "cancelled", "uncertain"]
 
 
-# ---------------------------------------------------------
-# 일정
-# ---------------------------------------------------------
-
-class Event(BaseModel):
-    """
-    통화에서 발견된 일정/약속/미팅 등의 후보.
-    """
-
-    title: str = Field(
-        min_length=1,
-        description="일정 제목. 예: 고객사 방문, 프로젝트 미팅",
-    )
-
-    date_text: str | None = Field(
-        default=None,
-        description=(
-            "전사에서 직접 언급된 날짜 표현. "
-            "예: '내일', '9월 25일', '다음 주 화요일'. "
-            "날짜가 언급되지 않은 경우에만 null."
-        ),
-    )
-
-    time_text: str | None = Field(
-        default=None,
-        description=(
-            "전사에서 직접 언급된 시간 표현. "
-            "예: '오후 4시', '아침 10시'. "
-            "정정된 경우 최종 시간을 기록한다. "
-            "시간이 언급되지 않은 경우에만 null."
-        ),
-    )
-
-    status: AnalysisStatus = Field(
-        description=(
-            "confirmed: 확정, "
-            "proposed: 제안만 됨, "
-            "cancelled: 취소됨, "
-            "uncertain: 판단 불명확"
-        ),
-    )
-
-    evidence: Evidence
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
-# ---------------------------------------------------------
-# 할 일
-# ---------------------------------------------------------
+class Segment(StrictModel):
+    segment_id: SegmentID
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+    speaker: Speaker | None
+    text: Text
 
-class Task(BaseModel):
-    """
-    통화에서 누군가 수행하기로 한 할 일.
-    """
 
-    title: str = Field(
-        min_length=1,
-        description="수행해야 하는 일. 예: 견적서 전달",
-    )
+class Transcript(StrictModel):
+    segments: list[Segment] = Field(min_length=1)
+    timezone: str | None = None
+    # Only a trusted source may supply the call time. Missing and unverified times stay null.
+    call_started_at: AwareDatetime | None = None
 
-    deadline_text: str | None = Field(
-        default=None,
-        description=(
-            "전사에서 직접 언급된 마감 표현. "
-            "예: '오늘 저녁까지', '금요일까지'. "
-            "기한이 언급되지 않은 경우에만 null."
-        ),
-    )
+    @model_validator(mode="after")
+    def check_ranges_and_clock(self):
+        ids = set()
+        previous_start = 0
+        for segment in self.segments:
+            if segment.segment_id in ids or not previous_start <= segment.start <= segment.end:
+                raise ValueError("Invalid transcript segment order, bounds or IDs")
+            previous_start = segment.start
+            ids.add(segment.segment_id)
+        if self.timezone is not None:
+            try:
+                ZoneInfo(self.timezone)
+            except (ZoneInfoNotFoundError, ValueError) as error:
+                raise ValueError("Invalid call time zone") from error
+        return self
 
+
+class Evidence(StrictModel):
+    segment_ids: list[SegmentID] = Field(min_length=1, max_length=10)
+
+
+class Summary(Evidence):
+    text: Annotated[Text, Field(max_length=4000)]
+
+
+class ExtractedEvent(Evidence):
+    title: Title
     status: AnalysisStatus
-
-    evidence: Evidence
-
-
-# ---------------------------------------------------------
-# 계약 관련 언급
-# ---------------------------------------------------------
-
-class ContractMention(BaseModel):
-    """
-    계약, 가격, 발주, 결제 등 법적/금전적으로 중요한 언급.
-
-    실제 계약 체결 여부를 모델이 임의로 판단하지 않는다.
-    원문에서 언급된 사실만 기록한다.
-    """
-
-    text: str = Field(
-        min_length=1,
-        description="계약 관련 핵심 내용을 원문의 의미를 보존하여 기록",
-    )
-
-    evidence: Evidence
+    date_text: Text | None
+    time_text: Text | None
 
 
-# ---------------------------------------------------------
-# 검토 필요 항목
-# ---------------------------------------------------------
-
-class ReviewItem(BaseModel):
-    """
-    모델이 확실하게 판단할 수 없는 내용을 사람이 확인하도록 전달한다.
-    """
-
-    reason: str = Field(
-        min_length=1,
-        description="확인이 필요한 이유",
-    )
-
-    evidence: Evidence | None = None
+class ExtractedTask(Evidence):
+    title: Title
+    status: AnalysisStatus
+    deadline_text: Text | None
+    assignee_segment_id: SegmentID | None
 
 
-# ---------------------------------------------------------
-# 최종 CallOps 분석 결과
-# ---------------------------------------------------------
+class ContractMention(Evidence):
+    text: Text
 
-class CallAnalysis(BaseModel):
-    """
-    한 통화에 대한 CallOps의 최종 구조화 분석 결과.
-    """
 
-    schema_version: str = Field(
-        default="1.0",
-        description="CallOps 분석 결과 스키마 버전",
-    )
+class ReviewItem(Evidence):
+    reason: Text
 
-    summary: str = Field(
-        min_length=1,
-        description="통화 전체의 간결한 업무 요약",
-    )
 
-    events: list[Event] = Field(
-        default_factory=list,
-    )
+class Extraction(StrictModel):
+    summary: Summary
+    events: list[ExtractedEvent]
+    tasks: list[ExtractedTask]
+    contract_mentions: list[ContractMention]
+    needs_review: list[ReviewItem]
 
-    tasks: list[Task] = Field(
-        default_factory=list,
-    )
+    def items(self):
+        return (self.events, self.tasks, self.contract_mentions, self.needs_review)
 
-    contract_mentions: list[ContractMention] = Field(
-        default_factory=list,
-    )
 
-    needs_review: list[ReviewItem] = Field(
-        default_factory=list,
-    )
+class Event(ExtractedEvent):
+    start_at: datetime | None
+    end_at: datetime | None
 
+
+class Task(ExtractedTask):
+    assignee: Speaker | None
+    due_at: datetime | None
+
+
+class CallAnalysis(Extraction):
+    schema_version: Literal["2.0"] = "2.0"
+    events: list[Event]
+    tasks: list[Task]

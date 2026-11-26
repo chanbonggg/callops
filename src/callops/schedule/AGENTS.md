@@ -2,7 +2,7 @@
 
 ## 책임과 구현 의도
 
-통화 분석에서 나온 합성 일정의 근거 검증, 후보 편집·승인·거절, 통합 목록, 직접 입력 일정 관리와 모의 Calendar 전송을 맡는다. 후보의 승인 상태와 Calendar 등록 상태를 별도로 저장한다. `service.py`는 후보와 승인, `calendar.py`는 모의 등록, `routes.py`와 `templates/`는 웹 화면을 담당한다. [일정과 모의 Calendar 계약](../../../docs/p2-p3-server.md#승인된-일정과-모의-calendar)
+통화 분석에서 나온 일정의 근거 검증, 후보 편집·승인·거절, 통합 목록, 직접 입력 일정 관리와 모의 Calendar 전송을 맡는다. 후보의 승인 상태와 Calendar 등록 상태를 별도로 저장한다. `service.py`는 후보와 승인, `calendar.py`는 모의 등록, `routes.py`와 `templates/`는 웹 화면을 담당한다. [일정과 모의 Calendar 계약](../../../docs/p2-p3-server.md#승인된-일정과-모의-calendar)
 
 ## 상태와 전송 흐름
 

@@ -80,11 +80,13 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 
 | 요청 | 목적 |
 |---|---|
+| `GET /worker/readiness` | 인증된 워커의 실제 결과 제출 허용 여부 |
 | `POST /worker/claim` | 승인된 작업의 임대와 고정 입력 식별자 발급 |
 | `GET /worker/jobs/{id}/input` | 할당된 워커/현재 임대의 입력만 조회한다. STT는 원음 바이트, 분석은 고정된 전사 artifact를 반환한다. 서버→GPU 전달은 이 API뿐이며 별도 폴더 동기화는 없다. [전달 방식](01-project.md#승인-음성의-gpu-전달-방식) |
 | `POST /worker/jobs/{id}/heartbeat` | 임대만 갱신 |
 | `POST /worker/jobs/{id}/start` | 요청 ID에 고정된 실행 기한 확인 |
 | `POST /worker/jobs/{id}/prepared` | spool 요청 ID·정확한 해시·크기·생성 시각 고정 |
+| `POST /worker/jobs/{id}/status` | 같은 임대와 `request_id`의 수락 여부·기존 ACK 또는 진행 중인 기한 조회 |
 | `POST /worker/jobs/{id}/result` | 같은 결과 바이트 수락 및 멱등 ACK |
 | `POST /worker/jobs/{id}/failed` 또는 `waiting-file` | 제한 재시도 또는 파일 대기 반환 |
 | `POST /worker/cleanup` | 자기 장비의 사본별 청소 조회/종료·삭제 확인 |
@@ -97,7 +99,7 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 
 수락 파일은 part 기록·fsync·rename 후 artifact 참조, 작업 성공, 다음 분석 작업을 한 DB 트랜잭션으로 저장한다. 성공 확정 직전에 임대·업로드·입력 보관 기한을 다시 검사한다. 기한을 넘긴 결과는 후보와 DB 참조를 롤백하고 해당 파일을 삭제한다. 재시작 때 참조 없는 생성 파일을 정리하고, 참조 파일이 없으면 INPUT_MISSING으로 수동 확인한다. 프로세스/DB 실패 복구를 검증하며 전원 차단에 대한 파일시스템 내구성 시험은 하지 않았다.
 
-`src/callops/processing/fake_worker.py`는 실제 워커 API를 통해 합성 결과를 처리한다. 전사 ACK 후 로컬 파일을 지워도 새 워커가 서버 artifact를 받아 분석한다. 결과에는 job·attempt·input ID/버전/해시가 포함된다. 가짜 STT 워커는 수신과 같은 디코더에서 읽은 재생 길이와 가상 텍스트로 구간 결과를 만든다. 가짜 분석 워커는 기본으로 합성 텍스트를 반환하고, `events`를 명시하면 합성 일정 후보를 반환한다. 실제 모델과 장시간 워커 heartbeat 스레드·연산 프로세스 종료·지속 spool 재개는 P4/P5/D5 구현 대상이다.
+`src/callops/processing/fake_worker.py`는 실제 워커 API를 통해 합성 결과를 처리한다. 가짜 STT 워커는 수신과 같은 디코더에서 읽은 재생 길이와 가상 텍스트로 구간 결과를 만든다. 가짜 분석 워커는 기본으로 합성 텍스트를 반환하고, `events`를 명시하면 합성 일정 후보를 반환한다. [실제 워커](../ai-worker/README.md#d5-워커-실행--wsl-데스크톱)도 같은 API에서 승인·임대·파일 보관 검사를 받는다.
 
 ### 합성 전사 결과 스키마와 조회
 
@@ -108,6 +110,15 @@ python scripts/manage.py serve --cert ABSOLUTE_CERT_PATH --key ABSOLUTE_PRIVATE_
 `GET /recordings/{id}`는 통화 상세와 최신 수락 STT 전사를 보여준다. `GET /recordings/{id}/transcripts/{artifact_id}#segment-{segment_id}`는 전사 버전과 구간을 고정한다. 사용자 세션이 필요하며 다른 통화의 artifact, 사적·삭제·만료 자료를 거부한다. 파일 해시·크기를 확인하고 기존 텍스트 결과는 시간 구간 없이 표시한다. GET은 보관 상태나 파일을 변경하지 않는다.
 
 원음의 초기 30일 기한이 지나도 유효한 전사 90일 기한 안에서는 전사를 조회할 수 있다. 원음을 사용할 수 없거나 구간 길이가 0이면 구간 재생 링크를 숨긴다. `GET /recordings/{id}/transcripts/{artifact_id}/audio/{segment_id}`는 저장된 시작·끝 시각으로 해당 구간만 WAV로 반환한다. 압축 원음은 메모리에서 PCM으로 디코딩하며 구간 파일을 보관하지 않는다. 응답 직전에 업무 승인과 원음 기한을 다시 확인한다.
+
+### D5 실제 모델 결과
+
+로컬 시험 HTTPS 서버를 시작할 때 `CALLOPS_REAL_WORKER_ID=desktop`으로 등록된 워커에게 실제 결과 제출을 허용한다. 기본 서버 설정은 합성 결과만 받는다. 시험 데이터와 시험 워커 토큰으로 구성한 서버에서 [데스크톱 워커](../ai-worker/README.md#d5-워커-실행--wsl-데스크톱)를 실행한다. 수락된 결과는 이후에도 전사·분석 파일의 해시와 보관 기한을 검사해 읽는다.
+
+- 입력 응답의 `X-Input-Artifact-ID`·`X-Input-Artifact-Version`은 claim에서 받은 값과 대조한다. STT의 artifact ID 헤더는 빈 값이다. 기한을 돌려주는 요청의 `X-CallOps-Server-Time`으로 워커가 남은 시간을 계산한다.
+- 실제 결과는 공통 필드에 `schema_version: 2`, `synthetic: false`, `model_name`과 `processing_seconds`를 포함한다. STT는 한국어 `language`, `duration_seconds`, 허용된 `warnings`, 구간별 `speaker`(A·B·null)를 보낸다. `NO_SPEECH`이면 빈 전사를 저장하고 STT를 완료한다.
+- 분석은 `prompt_version`과 `summary`, `events`, `tasks`, `needs_review`, `contract_mentions`를 보낸다. 서버는 실제 전사에 존재하는 구간 ID인지 대조한다. 명시적 취소의 근거는 확인 항목에 표시하고, 일정과 할 일은 사용자 검토 후보로 저장한다.
+- 워커가 응답을 받지 못하면 같은 요청 키로 상태를 조회한다. 업로드가 필요하면 원래 만들어 둔 바이트만 다시 보낸다. ACK 후 로컬 복사본을 제거하고 청소 요청 버전을 확인한다. 전사 유실이나 해시 오류의 분석 작업은 수동 확인으로 전환한다.
 
 ### 합성 요약 결과 스키마와 조회
 
@@ -269,7 +280,9 @@ HTML 폼과 아래 JSON API는 같은 입력 검증과 저장 함수를 쓴다. 
 
 ## 확인 범위
 
-**최신(2026-11-24)** — 로그인 UI 반영 후 Windows PostgreSQL 18.0 임시 클러스터에서 `python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3`를 실행했다. 하네스 7개·P1 3개·P2 19개·P3 70개, 총 99개가 skip 없이 통과했다. 브라우저 로그인 오류 응답과 미인증 정적 자산 접근, 012 마이그레이션과 연결 일정 동기화, 만료 정리, 할 일 후보, 질문 화면을 포함한다. 2026-11-19에 한 번 HTTP 503으로 실패했던 기존 큐 검사 2개도 통과했다. 당시 실패 원인은 확인하지 못했다. 아래는 당시 시점의 기록이며 개수와 범위는 그때 기준이다.
+**2026-11-25** — Ubuntu PostgreSQL 16.15 임시 클러스터에서 `python scripts/test_postgres.py --pg-bin <경로> --phase P3`로 하네스 7개·P1 3개·P2 19개·P3 74개, 총 103개가 통과했다. 실제 모델 결과 형식의 선택 수락, 무음, 전사 원본에 고정된 분석과 결과 상태를 포함한다. [D5 실제 GPU 검증](02-desktop.md#2026-11-25-d5-로컬-워커-검증)
+
+**2026-11-24** — 로그인 UI 반영 후 Windows PostgreSQL 18.0 임시 클러스터에서 `python scripts/test_postgres.py --pg-bin E:/PostgreSQL/bin --phase P3`를 실행했다. 하네스 7개·P1 3개·P2 19개·P3 70개, 총 99개가 skip 없이 통과했다. 브라우저 로그인 오류 응답과 미인증 정적 자산 접근, 012 마이그레이션과 연결 일정 동기화, 만료 정리, 할 일 후보, 질문 화면을 포함한다. 2026-11-19에 한 번 HTTP 503으로 실패했던 기존 큐 검사 2개도 통과했다. 당시 실패 원인은 확인하지 못했다. 아래는 당시 시점의 기록이며 개수와 범위는 그때 기준이다.
 
 2026-11-11 전사 검색 추가 후 하네스·P1~P3 46개를 통과했다. 임시 데이터로 로컬 HTTPS에서 수신·업무 승인·가짜 워커 처리 후 전사 검색과 고정 근거 링크를 확인했다.
 
