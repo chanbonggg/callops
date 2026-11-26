@@ -5,6 +5,9 @@ from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from ..common import Conflict
+from .rag import CONTRACT_VERSION
+
 
 async def json_object(request):
     media_type = request.headers.get('content-type', '').partition(';')[0].strip().lower()
@@ -24,17 +27,27 @@ def routes(queue):
         return JSONResponse(data, headers={'X-CallOps-Server-Time': queue.service.clock().isoformat()})
 
     def readiness(request):
-        return timed_response({'real_results': request.state.worker == queue.real_worker})
+        real = request.state.worker == queue.real_worker
+        data = {'real_results': real}
+        if real and queue.rag is not None:
+            data['rag_contract_version'] = CONTRACT_VERSION
+        return timed_response(data)
 
-    def claim(request):
-        return timed_response(queue.claim(request.state.worker))
+    async def claim(request):
+        body = await json_object(request) if await request.body() else {}
+        if 'rag_contract_version' in body and type(body['rag_contract_version']) is not int:
+            raise HTTPException(400)
+        capable = body.get('rag_contract_version') == CONTRACT_VERSION
+        result = await run_in_threadpool(queue.claim, request.state.worker, rag_capable=capable)
+        return timed_response(result)
 
     def worker_input(request):
-        data, artifact, version = queue.input(request.state.worker, request.path_params['job_id'],
-                                              request.headers.get('X-Lease-Token'))
-        return Response(data, media_type='application/octet-stream',
-                        headers={'X-Input-Artifact-ID': str(artifact) if artifact else '',
-                                 'X-Input-Artifact-Version': str(version)})
+        data, source, version, snapshot = queue.input(request.state.worker, request.path_params['job_id'],
+                                                       request.headers.get('X-Lease-Token'))
+        kind = 'Snapshot' if snapshot else 'Artifact'
+        return Response(data, media_type='application/json' if snapshot else 'application/octet-stream',
+                        headers={f'X-Input-{kind}-ID': str(source) if source else '',
+                                 f'X-Input-{kind}-Version': str(version)})
 
     async def report(request):
         worker, job_id = request.state.worker, request.path_params['job_id']
@@ -43,6 +56,8 @@ def routes(queue):
             data = await request.body()
             result = await run_in_threadpool(queue.upload, worker, job_id, token,
                                              request.headers.get('X-Result-Request-ID'), data)
+            if 'error' in result:
+                raise Conflict(result['error'])
         else:
             result = await run_in_threadpool(queue.report, worker, job_id, token, action, await json_object(request))
         return timed_response(result)

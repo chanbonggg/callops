@@ -1,6 +1,8 @@
 {% extends "layout.html" %}
 {% from "call_fields.html" import search_modes %}
 {% block title %}통화에 질문하기{% endblock %}
+{% set pending = state in ('rag_indexing', 'rag_waiting', 'rag_running') %}
+{% block head %}{% if pending %}<script defer src="/questions/poll.js"></script>{% endif %}{% endblock %}
 {% block content %}
 <div>
   <h1>통화에 질문하기</h1>
@@ -30,7 +32,41 @@
 {% if unavailable %}<p class="notice">일부 전사를 확인할 수 없습니다.</p>{% endif %}
 {% if state %}
 <section class="card" aria-labelledby="question-result">
-  {% if state == 'missing' %}
+  {% if pending %}
+  <h2 id="question-result">
+    {% if state == 'rag_indexing' %}검색할 전사를 준비하고 있어요
+    {% elif state == 'rag_waiting' %}워커 대기 중
+    {% else %}답변을 준비하고 있어요{% endif %}
+  </h2>
+  <a class="button secondary" href="{{ request.url.path }}">상태 새로 보기</a>
+  {% elif state == 'rag_expired' %}
+  <h2 id="question-result">질문 결과가 만료됐어요</h2>
+  <p>현재 보관된 통화에서 다시 질문해 보세요.</p>
+  {% elif state == 'rag_revoked' %}
+  <h2 id="question-result">질문에 사용된 원본을 이용할 수 없어요</h2>
+  <p>현재 보관된 통화에서 다시 질문해 보세요.</p>
+  {% elif state in ('rag_timeout_waiting', 'rag_timeout_running') %}
+  <h2 id="question-result">
+    {% if state == 'rag_timeout_waiting' %}대기 중 질문 기한이 지났어요
+    {% else %}처리 중 질문 기한이 지났어요{% endif %}
+  </h2>
+  <p>잠시 뒤 다시 질문해 보세요.</p>
+  {% elif state == 'rag_index_failed' %}
+  <h2 id="question-result">검색 범위에 준비하지 못한 전사가 있어요</h2>
+  <p>거래처나 기간을 좁혀 다시 질문해 보세요.</p>
+  {% elif state == 'rag_context' %}
+  <h2 id="question-result">질문 범위를 확인해 주세요</h2>
+  <p>한 번에 확인할 근거가 많아요. 거래처나 기간을 좁혀 다시 질문해 보세요.</p>
+  {% elif state == 'rag_failed' %}
+  <h2 id="question-result">질문 처리를 마치지 못했어요</h2>
+  <p>잠시 뒤 다시 질문해 보세요.</p>
+  {% elif state == 'rag_answer' %}
+  <h2 id="question-result">답변</h2>
+  <p>{{ answer }}</p>
+  {% elif state == 'rag_abstain' %}
+  <h2 id="question-result">근거를 더 확인해야 해요</h2>
+  <p>{{ reason }}</p>
+  {% elif state == 'missing' %}
   <h2 id="question-result">답변할 근거를 찾지 못했어요</h2>
   <p>거래처, 미팅 주제처럼 기억나는 단서를 넣어 다시 질문해 보세요.</p>
   {% elif state == 'clarify' %}

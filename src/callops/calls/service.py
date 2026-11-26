@@ -322,7 +322,8 @@ class Service:
                          (uuid4(), row['id'], decision, now))
             if decision == 'BUSINESS_APPROVED':
                 conn.execute('''INSERT INTO callops.jobs (id,recording_id,stage,retry_at)
-                    VALUES (%s,%s,'STT',%s) ON CONFLICT (recording_id,stage,pipeline_version) DO NOTHING''',
+                    VALUES (%s,%s,'STT',%s) ON CONFLICT (recording_id,stage,pipeline_version)
+                    WHERE stage IN ('STT','ANALYSIS') DO NOTHING''',
                     (uuid4(), row['id'], now))
             elif decision == 'PRIVATE_EXCLUDED':
                 self.request_delete(conn, row['id'])
@@ -344,9 +345,12 @@ class Service:
         )
         UPDATE callops.mock_calendar_events e SET title=NULL,start_at=NULL,end_at=NULL
         FROM removed_schedules s WHERE e.event_id=s.id''', (self.clock(), recording_id))
-        conn.execute("UPDATE callops.jobs SET status='CANCELLED' WHERE recording_id=%s", (recording_id,))
+        conn.execute("UPDATE callops.jobs SET status='CANCELLED',rag_input=NULL WHERE recording_id=%s", (recording_id,))
         conn.execute('''UPDATE callops.attempts SET cleanup_requested=true WHERE job_id IN
             (SELECT id FROM callops.jobs WHERE recording_id=%s)''', (recording_id,))
+        artifacts = conn.execute('SELECT id FROM callops.artifacts WHERE recording_id=%s',
+                                 (recording_id,)).fetchall()
+        self.prune_rag(conn, self.clock(), [row['id'] for row in artifacts])
 
     def maintain(self):
         """Run cleanup and return the cutoff used for this pass.
@@ -400,11 +404,42 @@ class Service:
                 AND f.deletion_state='NONE' AND f.expires_at<=%s RETURNING f.id''', (now,)).fetchall()
         if artifacts:
             ids = [row['id'] for row in artifacts]
-            conn.execute('''UPDATE callops.jobs SET status='CANCELLED',error_code='INPUT_EXPIRED'
+            conn.execute('''UPDATE callops.jobs SET status='CANCELLED',error_code='INPUT_EXPIRED',rag_input=NULL
                 WHERE input_artifact_id=ANY(%s) AND status NOT IN ('SUCCEEDED','CANCELLED')''', (ids,))
             conn.execute('''UPDATE callops.attempts a SET cleanup_requested=true FROM callops.jobs j
                 WHERE a.job_id=j.id AND NOT a.cleaned AND NOT a.cleanup_requested
                     AND (j.input_artifact_id=ANY(%s) OR a.result_artifact_id=ANY(%s))''', (ids, ids))
+        self.prune_rag(conn, now, [row['id'] for row in artifacts])
+
+    def prune_rag(self, conn, now, artifact_ids):
+        if artifact_ids:
+            conn.execute('DELETE FROM callops.rag_chunks WHERE artifact_id=ANY(%s)', (artifact_ids,))
+            conn.execute('''UPDATE callops.jobs SET status='CANCELLED',error_code='INPUT_EXPIRED',rag_input=NULL
+                WHERE input_artifact_id=ANY(%s) AND rag_offset IS NOT NULL
+                    AND status NOT IN ('SUCCEEDED','CANCELLED')''', (artifact_ids,))
+            conn.execute('''UPDATE callops.attempts a SET cleanup_requested=true FROM callops.jobs j
+                WHERE a.job_id=j.id AND j.rag_offset IS NOT NULL AND j.input_artifact_id=ANY(%s)
+                    AND NOT a.cleaned''', (artifact_ids,))
+        expired = conn.execute('''UPDATE callops.rag_questions q
+            SET request=NULL,evidence='[]',source_pins='{}',result=NULL,error_code=CASE
+                WHEN q.source_artifacts && %s::uuid[] THEN 'RAG_SOURCE_UNAVAILABLE'
+                WHEN q.result IS NOT NULL THEN 'RAG_RESULT_EXPIRED'
+                WHEN EXISTS (SELECT 1 FROM callops.jobs j WHERE j.rag_question_id=q.id AND j.rag_tries>0)
+                    THEN 'RAG_DEADLINE_RUNNING'
+                ELSE 'RAG_DEADLINE_WAITING' END
+            WHERE q.request IS NOT NULL
+              AND (COALESCE(q.display_until,q.expires_at)<=%s OR q.source_artifacts && %s::uuid[])
+            RETURNING q.id''', (artifact_ids, now, artifact_ids)).fetchall()
+        if expired:
+            ids = [row['id'] for row in expired]
+            conn.execute('''UPDATE callops.jobs SET status='CANCELLED',error_code='INPUT_EXPIRED',rag_input=NULL
+                WHERE rag_question_id=ANY(%s) AND status NOT IN ('SUCCEEDED','CANCELLED')''', (ids,))
+            conn.execute('''UPDATE callops.attempts SET cleanup_requested=true
+                WHERE rag_question_id=ANY(%s) AND NOT cleaned''', (ids,))
+        conn.execute('''DELETE FROM callops.rag_questions q
+            WHERE COALESCE(q.display_until,q.expires_at)+INTERVAL '24 hours'<=%s
+            AND NOT EXISTS (SELECT 1 FROM callops.attempts a WHERE a.rag_question_id=q.id AND NOT a.cleaned)''',
+            (now,))
 
     def clean_rejected_receipts(self, conn, now):
         for rejected in conn.execute('SELECT * FROM callops.rejected_receipts WHERE expires_at<=%s', (now,)).fetchall():
@@ -453,9 +488,13 @@ class Service:
         return True
 
     def clean_recordings(self, conn):
-        rows = conn.execute('''SELECT r.*, EXISTS (SELECT 1 FROM callops.attempts a JOIN callops.jobs j ON j.id=a.job_id
+        rows = conn.execute('''SELECT r.*, (EXISTS (SELECT 1 FROM callops.attempts a JOIN callops.jobs j ON j.id=a.job_id
                 WHERE a.recording_id=r.id AND NOT a.cleaned
-                    AND (r.deletion_state<>'NONE' OR j.stage='STT')) AS worker_pending
+                    AND (r.deletion_state<>'NONE' OR j.stage='STT'))
+                OR (r.deletion_state<>'NONE' AND EXISTS (
+                    SELECT 1 FROM callops.attempts a JOIN callops.rag_questions q ON q.id=a.rag_question_id
+                    JOIN callops.artifacts f ON f.id=ANY(q.source_artifacts)
+                    WHERE NOT a.cleaned AND f.recording_id=r.id))) AS worker_pending
             FROM callops.recordings r WHERE r.deletion_state IN ('REQUESTED','RETRY_WAIT')
                 OR (r.deletion_state='NONE' AND r.audio_deletion_state IN ('REQUESTED','RETRY_WAIT'))''').fetchall()
         for row in rows:
@@ -481,9 +520,11 @@ class Service:
                         THEN 'COMPLETE' ELSE audio_deletion_state END WHERE id=%s''', (state, state, row['id']))
 
     def clean_expired_artifacts(self, conn):
-        artifacts = conn.execute('''SELECT f.id,f.deletion_state, EXISTS (SELECT 1 FROM callops.attempts a
+        artifacts = conn.execute('''SELECT f.id,f.deletion_state, (EXISTS (SELECT 1 FROM callops.attempts a
                 JOIN callops.jobs j ON j.id=a.job_id WHERE a.recording_id=f.recording_id AND NOT a.cleaned
-                    AND (j.input_artifact_id=f.id OR a.result_artifact_id=f.id)) AS worker_pending
+                AND (j.input_artifact_id=f.id OR a.result_artifact_id=f.id))
+                OR EXISTS (SELECT 1 FROM callops.attempts a JOIN callops.rag_questions q ON q.id=a.rag_question_id
+                    WHERE NOT a.cleaned AND f.id=ANY(q.source_artifacts))) AS worker_pending
             FROM callops.artifacts f JOIN callops.recordings r ON r.id=f.recording_id
             WHERE r.deletion_state='NONE' AND f.deletion_state IN ('REQUESTED','RETRY_WAIT')''').fetchall()
         for artifact in artifacts:

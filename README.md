@@ -4,7 +4,7 @@
 
 현재는 **P1~P3 서버 기반, 전사·검색·질문, 일정·할 일 후보 검토, 직접 입력 일정·할 일, 모의 Calendar 양방향 동기화, 30일·90일 만료 정리**를 구현했습니다. D5 로컬 시험에서는 업무 승인된 합성 WAV를 실제 GPU 워커 한 대로 처리해 전사·AI 요약·근거가 붙은 후보를 확인했습니다. 실제 결과를 제출할 워커는 시험 서버에서 명시적으로 지정합니다. [D5 검증](docs/02-desktop.md#2026-11-25-d5-로컬-워커-검증)
 
-홈서버에는 공용 n8n을 설치했고 CallOps 웹의 공개 HTTPS에서 소유자 계정으로 로그인과 로그아웃을 확인했습니다. 홈서버와 GPU 워커의 VPN 연결, 갤럭시 실기기, 실제 Google Calendar, CallOps 알림 연동은 후속 검증입니다. [CallOps 접속](https://callops.finel.co.kr/) · [진행 체크리스트](docs/progress-checklist.md) · [n8n 접속 안내](docs/03-server.md#최초-관리-접속)
+홈서버에서 CallOps 웹과 전용 PostgreSQL을 실행합니다. 공용 n8n을 설치했고 CallOps 웹의 공개 HTTPS에서 소유자 계정으로 로그인과 로그아웃을 확인했습니다. 홈서버와 GPU 워커의 VPN 연결, 갤럭시 실기기, 실제 Google Calendar, CallOps 알림 연동은 후속 검증입니다. [CallOps 접속](https://callops.finel.co.kr/) · [진행 체크리스트](docs/progress-checklist.md) · [n8n 접속 안내](docs/03-server.md#최초-관리-접속) · [홈서버 접속 및 운영](docs/home-server-deployment.md)
 
 업무 승인 전 통화 상대·실제 통화 시각을 입력하고 상대·날짜로 검색할 수 있습니다.
 
@@ -26,13 +26,13 @@
 
 화자가 표시된 합성 전사의 일정·할 일 후보 추출은 고정 시험 57/57을 통과했습니다. BGE-M3 검색과 Qwen 답변은 기존 최종 20문항의 재평가에서 17/20을 기록했습니다. [D4 추출 결과](docs/02-desktop.md#2026-11-24-d4-추출-고정-평가) · [검색 재평가 결과](docs/02-desktop.md#2026-11-25-d4-검색-재평가)
 
-데스크톱 워커에서 BGE-M3 임베딩과 Qwen 근거 답변을 각각 실행할 수 있습니다. 질문 화면과 연결하려면 서버의 작업 할당과 pgvector 검색을 구현해야 합니다. [워커 실행과 합성 GPU 시험](ai-worker/README.md#질문-모델-워커-실행)
+CallOps의 근거 질문은 PostgreSQL의 pgvector 검색과 데스크톱 워커의 BGE-M3·Qwen 실행을 연결합니다. 질문 화면에 모델 답변과 전사·원음 근거를 표시합니다. 기본 실행에는 어휘 기반 질문을 사용하며, 모델 연동은 지정 워커와 함께 켭니다. [질문 서버 동작](docs/p2-p3-server.md#pgvector와-질문-워커) · [홈서버 적용](docs/home-server-deployment.md#서버에서-적용-및-확인)
 
 ## 개발 시작
 
 웹 서버는 Starlette로 구성하고 Uvicorn으로 실행합니다. 한 앱 안에서 인증, 통화 관리, 처리 큐를 기능별로 나눕니다. [모듈 구성](docs/01-project.md#3-소유권과-저장소-구성)과 [로컬 HTTPS 실행](docs/p2-p3-server.md#로그인-화면)을 참고하세요.
 
-Python 3.12와 Git이 있는 환경에서 다음 명령으로 하네스를 검증합니다. 이 명령에는 추가 패키지가 필요하지 않습니다. 서버 기능 변경은 [requirements.txt](requirements.txt)를 설치한 뒤 임시 PostgreSQL 검사(`python scripts/test_postgres.py --pg-bin <경로> --phase P3`)로 확인합니다. [검사 안내](docs/harness.md#실행)
+Python 3.12와 Git이 있는 환경에서 다음 명령으로 하네스를 검증합니다. 이 명령에는 추가 패키지가 필요하지 않습니다. 서버 기능 변경은 [requirements.txt](requirements.txt)를 설치한 뒤 pgvector가 설치된 임시 PostgreSQL에서 검사합니다. [검사 안내](docs/harness.md#실행)
 
 ```text
 python scripts/check.py

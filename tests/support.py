@@ -18,6 +18,7 @@ from callops.web import create_app
 
 class ProductCase(unittest.TestCase):
     real_worker = ''
+    rag_enabled = False
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -30,7 +31,7 @@ class ProductCase(unittest.TestCase):
         self.tokens = {'one': 'test-worker-one-' + 'x' * 32, 'two': 'test-worker-two-' + 'y' * 32}
         self.app = create_app(self.settings, secret='test-session-' + 'z' * 32, owner='owner',
                               password_hash=generate_password_hash('test-password'), workers=self.tokens,
-                              clock=lambda: self.now, real_worker=self.real_worker)
+                              clock=lambda: self.now, real_worker=self.real_worker, rag_enabled=self.rag_enabled)
         self.client = self.enterContext(TestClient(self.app, base_url='https://localhost', follow_redirects=False))
         self.service = self.app.state.callops
         self.queue = self.app.state.queue
