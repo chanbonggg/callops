@@ -1,5 +1,9 @@
+from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
+import sys
+from unittest.mock import Mock, patch
 from uuid import UUID, uuid4
 
 from callops.common import digest
@@ -86,6 +90,64 @@ class RagTests(RealResultCase):
         self.assertEqual(self.api('status', job, json={'request_id': report['request_id']}).json(), ack)
         self.assertEqual(self.upload(job, data, report).json(), ack)
         self.clean()
+
+    # The desktop worker uses POSIX file locks. The server API tests below also run on Windows.
+    if os.name == 'posix':
+        def test_desktop_loop_runs_both_rag_stages_and_recovers_a_lost_result_ack(self):
+            worker_source = Path(__file__).resolve().parents[2] / 'ai-worker'
+            with patch.object(sys, 'path', [str(worker_source), *sys.path]):
+                from app import worker
+
+            recording, artifact = self.transcript('가상 거래처 A', '2029-12-31T22:00', '방문을 합의했어요')
+            url = self.submit(counterparty='가상 거래처 A')
+            copies = worker.Copies(Path(self.temp.name) / 'desktop')
+            stages = []
+
+            def model(job, directory, check):
+                check()
+                payload = json.loads((directory / 'input').read_bytes())
+                self.assertEqual(payload['schema_version'], 1)
+                stages.append(job['stage'])
+                if job['stage'] == 'RAG_EMBED':
+                    return self.embedding(*(unit(0) for _ in payload['texts']))
+                self.assertEqual([row['id'] for row in payload['evidence']], [f'{artifact}:1'])
+                return self.answer(f'{artifact}:1')
+
+            def desktop(stream, run_model):
+                api = worker.WorkerAPI(stream, self.tokens['one'], transport_errors=(OSError,))
+                return worker.Worker(api, copies, run_model)
+
+            normal = desktop(self.client.stream, model)
+            for _ in range(2):
+                ack = normal.once()
+                self.assertEqual(str(UUID(ack['result_id'])), ack['result_id'])
+
+            committed = {}
+
+            @contextmanager
+            def lose_ack(method, path, **kwargs):
+                with self.client.stream(method, path, **kwargs) as response:
+                    if path.endswith('/result'):
+                        self.assertEqual(response.status_code, 200)
+                        response.read()
+                        committed.update(response.json())
+                        raise OSError('Simulated lost result ACK')
+                    yield response
+
+            with self.assertRaises(worker.Offline):
+                desktop(lose_ack, model).once()
+            self.assertEqual(stages, ['RAG_EMBED', 'RAG_EMBED', 'RAG_ANSWER'])
+            self.assertEqual(len(list(copies.pending())), 1)
+            no_model = Mock()
+            self.assertEqual(desktop(self.client.stream, no_model).once(), committed)
+            no_model.assert_not_called()
+            self.assertEqual(list(copies.work.iterdir()), [])
+            self.assertEqual(list(copies.spool.iterdir()), [])
+            self.assertEqual(self.api('cleanup', json={}).json(), [])
+            self.assertIn('가상 약속과 자료', self.http('GET', url).text)
+            audio = f'/recordings/{recording}/transcripts/{artifact}/audio/1'
+            self.assertIn(audio, self.http('GET', url).text)
+            self.assertEqual(self.http('GET', audio).status_code, 200)
 
     def test_questions_filter_before_pgvector_and_validate_multi_call_citations(self):
         outside = self.transcript('가상 거래처 A', '2030-01-01T00:00', '범위 밖 합의')

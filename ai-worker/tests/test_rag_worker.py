@@ -51,12 +51,12 @@ class RagWorkerTests(unittest.TestCase):
         }
         self.draft = {'answer': '4월 5일로 확정됐습니다.', 'reason': None, 'segment_ids': ['C1:S1']}
 
-    def invoke(self, stage, payload, *, success=True):
+    def invoke(self, stage, payload, *, success=True, failure_code=1):
         directory = self.root / str(uuid4())
         directory.mkdir(mode=0o700)
         (directory / 'input').write_bytes(json_bytes(payload))
         code = worker_engine.main([stage, str(directory), '--ollama-models', str(self.root)])
-        self.assertEqual(code, 0 if success else 1)
+        self.assertEqual(code, 0 if success else failure_code)
         result = directory / 'result.json'
         if not success:
             self.assertFalse(result.exists())
@@ -161,7 +161,7 @@ class RagWorkerTests(unittest.TestCase):
         question = dict(self.question, evidence=[
             dict(source, text='가' * 1500) for source in self.question['evidence']
         ])
-        self.invoke('RAG_ANSWER', question, success=False)
+        self.invoke('RAG_ANSWER', question, success=False, failure_code=worker_engine.RAG_CONTEXT_EXIT)
         self.client.chat.assert_not_called()
 
     def test_empty_answer_runs_in_the_normal_isolated_engine_without_ollama(self):

@@ -53,6 +53,7 @@ python scripts/check.py --phase P3
 |---|---|
 | `test_queue.py` | 큐·임대·기한·ACK·취소 청소 |
 | `test_real_worker.py` | 실제 결과 형식의 선택 수락, 고정 전사 분석, 결과 상태와 무음 |
+| `test_rag.py` | pgvector 검색과 질문 작업, POSIX에서 데스크톱 루프의 두 RAG 단계·ACK 유실 복구·사본 청소 |
 | `test_audio_formats.py` | 형식별 수신·호환 재생 |
 | `test_transcript_views.py` | 합성 전사·요약, 인용 재생, 전사 검색, 근거 검색, 통화 질문 |
 | `test_schedule_candidates.py` | 일정 후보 검토, 직접 입력 일정, 월간 캘린더, 모의 전송 |

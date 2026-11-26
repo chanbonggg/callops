@@ -16,13 +16,19 @@ import time
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from app.worker_io import Copies, MAX_AUDIO, MAX_RESULT, WorkerError, copy_key, json_bytes, open_private, verify_job
+from app.worker_io import (
+    Copies, MAX_AUDIO, MAX_RAG_INPUT, MAX_RESULT, RAG_CONTEXT_TOO_LONG, RAG_CONTRACT_VERSION, RAG_STAGES,
+    WorkerError, copy_key, open_private, result_bytes, verify_job,
+)
 
 
 INVALID_ATTEMPT = {'INVALID_LEASE', 'APPROVAL_REVOKED', 'INPUT_EXPIRED', 'DEADLINE_EXCEEDED'}
 INPUT_FAILURES = {'INPUT_MISSING', 'INPUT_CORRUPT'}
 PHASE_TIMEOUTS = {'PREPARATION_TIMEOUT', 'STAGE_TIMEOUT', 'UPLOAD_TIMEOUT'}
-REPORTABLE_FAILURES = PHASE_TIMEOUTS | INPUT_FAILURES | {'PREPARATION_ERROR', 'MODEL_ERROR', 'UPLOAD_ERROR'}
+REPORTABLE_FAILURES = PHASE_TIMEOUTS | INPUT_FAILURES | {
+    'PREPARATION_ERROR', 'MODEL_ERROR', 'UPLOAD_ERROR', RAG_CONTEXT_TOO_LONG,
+}
+# The loop can poll again after these errors. The server decides whether a job is retried.
 RETRYABLE_ERRORS = REPORTABLE_FAILURES | INVALID_ATTEMPT | {
     'INVALID_RESULT', 'WORKER_NOT_CLEAN', 'WAITING_FOR_FILE', 'LEASE_ENDED', 'SERVER_UNAVAILABLE',
 }
@@ -93,11 +99,16 @@ class WorkerAPI:
 
     def download(self, job, target, check):
         part = target.with_suffix('.part')
-        expected_id = job['input_artifact_id'] or ''
-        limit = MAX_AUDIO if job['stage'] == 'STT' else MAX_RESULT
+        if job['stage'] in RAG_STAGES:
+            kind, limit = 'Snapshot', MAX_RAG_INPUT
+            expected_id, version = job['input_snapshot_id'], job['input_snapshot_version']
+        else:
+            kind = 'Artifact'
+            limit = MAX_AUDIO if job['stage'] == 'STT' else MAX_RESULT
+            expected_id, version = job['input_artifact_id'] or '', job['input_artifact_version']
         with self.request('GET', 'input', job=job) as response:
-            if (response.headers.get('X-Input-Artifact-ID') != expected_id
-                    or response.headers.get('X-Input-Artifact-Version') != str(job['input_artifact_version'])):
+            if (response.headers.get(f'X-Input-{kind}-ID') != expected_id
+                    or response.headers.get(f'X-Input-{kind}-Version') != str(version)):
                 raise WorkerError('INPUT_CORRUPT')
             digest, size = hashlib.sha256(), 0
             with open_private(part) as output:
@@ -170,9 +181,13 @@ class Worker:
             self.api.post('cleanup', json={**item, 'stopped': True, 'removed': True})
 
     def accept(self, job, ack):
-        if ack.get('accepted') is not True:
+        if not isinstance(ack, dict) or ack.get('accepted') is not True:
             raise WorkerError('INVALID_ACK')
-        copy_key(ack['artifact_id'])
+        key = 'result_id' if job['stage'] in RAG_STAGES else 'artifact_id'
+        try:
+            copy_key(ack.get(key))
+        except ValueError:
+            raise WorkerError('INVALID_ACK') from None
         self.copies.remove(job['copy_key'])
         self.clean()
         return ack
@@ -208,14 +223,15 @@ class Worker:
         if code == 'ENGINE_STOP_UNCONFIRMED':
             # Keep the guard and copies until an operator can prove the engine stopped.
             return
+        # RAG result rejection already records a terminal failure and requests cleanup.
+        if code == 'INVALID_RESULT' and job['stage'] not in RAG_STAGES:
+            code = 'UPLOAD_ERROR'
         try:
             if code == 'WAITING_FOR_FILE':
                 self.api.post('waiting-file', job, json={})
-            elif code in REPORTABLE_FAILURES | {'INVALID_RESULT'}:
+            elif code in REPORTABLE_FAILURES:
                 if code in INPUT_FAILURES and job['stage'] == 'STT':
                     code = 'PREPARATION_ERROR'
-                if code == 'INVALID_RESULT':
-                    code = 'UPLOAD_ERROR'
                 self.api.post('failed', job, json={'code': code})
         except Rejected as rejected:
             if rejected.code not in INVALID_ATTEMPT | {'INVALID_ERROR_CODE'}:
@@ -262,10 +278,7 @@ class Worker:
             check_execution()
             body = self.run_model(job, directory, check_execution)
             check_execution()
-            binding = {name: job[name] for name in ('job_id', 'input_artifact_id', 'input_artifact_version', 'input_sha256')}
-            data = json_bytes(body | binding | {'schema_version': 2, 'synthetic': False, 'attempt_id': job['copy_key']})
-            if len(data) > MAX_RESULT:
-                raise WorkerError('MODEL_ERROR')
+            data = result_bytes(job, body)
             report = {'request_id': str(uuid4()), 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
                       'spool_created_at': max(started.server_time, lease.server_time).isoformat()}
             try:
@@ -286,9 +299,16 @@ class Worker:
                 raise WorkerError('REAL_RESULTS_DISABLED')
             if self.ready is not None:
                 self.ready()
-            claim = self.api.post('claim')
+            version = ready.data.get('rag_contract_version')
+            rag_capable = type(version) is int and version == RAG_CONTRACT_VERSION
+            if rag_capable:
+                claim = self.api.post('claim', json={'rag_contract_version': RAG_CONTRACT_VERSION})
+            else:
+                claim = self.api.post('claim')
             if claim.data is None:
                 return None
+            if claim.data['stage'] in RAG_STAGES and not rag_capable:
+                raise WorkerError('RAG_NOT_NEGOTIATED')
             try:
                 ack = self.process(claim)
             except Offline:

@@ -12,10 +12,12 @@ import subprocess
 import sys
 import time
 
-from app.worker_io import MAX_RESULT, WorkerError, json_bytes, publish, sync_directory
+from app.worker_io import (
+    MAX_RAG_INPUT, RAG_CONTEXT_TOO_LONG, RAG_STAGES, WorkerError, json_bytes, publish, result_limit, sync_directory,
+)
 
 
-RAG_STAGES = ('RAG_EMBED', 'RAG_ANSWER')
+RAG_CONTEXT_EXIT = 3
 
 
 def live_group(group):
@@ -98,12 +100,15 @@ class StageProcess:
                 stop_group(process)
             self.guard.unlink()
             sync_directory(self.guard.parent)
+        if stage == 'RAG_ANSWER' and process.returncode == RAG_CONTEXT_EXIT:
+            raise WorkerError(RAG_CONTEXT_TOO_LONG)
         if process.returncode != 0:
             raise WorkerError('MODEL_ERROR')
         try:
+            limit = result_limit(stage)
             with (directory / 'result.json').open('rb') as stream:
-                data = stream.read(MAX_RESULT + 1)
-            if len(data) > MAX_RESULT:
+                data = stream.read(limit + 1)
+            if len(data) > limit:
                 raise ValueError
             result = json.loads(data)
         except (OSError, ValueError, RecursionError):
@@ -208,8 +213,8 @@ def run_rag(stage, source, models):
     from app.analyzer import MODEL_DIGEST, MODEL_NAME, local_client
 
     with source.open('rb') as stream:
-        raw = stream.read(rag.MAX_INPUT_BYTES + 1)
-    if len(raw) > rag.MAX_INPUT_BYTES:
+        raw = stream.read(MAX_RAG_INPUT + 1)
+    if len(raw) > MAX_RAG_INPUT:
         raise ValueError('RAG input exceeds its size limit')
     embedding = stage == 'RAG_EMBED'
     if embedding:
@@ -258,7 +263,12 @@ def main(argv=None):
         elif args.stage == 'ANALYSIS':
             data = run_analysis(source, args.call_started_at, args.ollama_models)
         else:
-            data = run_rag(args.stage, source, args.ollama_models)
+            from app.rag import ContextTooLong
+
+            try:
+                data = run_rag(args.stage, source, args.ollama_models)
+            except ContextTooLong:
+                return RAG_CONTEXT_EXIT
         publish(args.directory / 'result.json', json_bytes(data))
     except (Exception, KeyboardInterrupt):
         return 1

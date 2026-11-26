@@ -18,7 +18,6 @@ EMBED_MODEL = "bge-m3:567m"
 EMBED_DIGEST = "7907646426070047a77226ac3e684fbbe8410524f7b4a74d02837e43f2146bab"
 EMBED_DIMENSIONS = 1024
 MAX_EMBED_BYTES = 4096
-MAX_INPUT_BYTES = 80 * 1024
 ANSWER_OPTIONS = {"temperature": 0, "num_ctx": 8192, "num_predict": 768}
 ANSWER_PROMPT_BUDGET = ANSWER_OPTIONS["num_ctx"] - ANSWER_OPTIONS["num_predict"] - TEMPLATE_TOKENS
 PROMPT_VERSION = "rag-v10"
@@ -92,6 +91,10 @@ class AnswerRequest(RagRequest):
         return self
 
 
+class ContextTooLong(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class RagPrompts:
     answer: str
@@ -156,7 +159,7 @@ def embed_texts(client, texts, *, keep_alive=0):
 def request_response(client, prompt, payload, schema, *, allowed_citations=None):
     content = compact_json(payload)
     if byte_size(prompt) + byte_size(content) > ANSWER_PROMPT_BUDGET:
-        raise ValueError("Question context exceeds its byte budget")
+        raise ContextTooLong("Question context exceeds its byte budget")
     response_format = schema.model_json_schema()
     if allowed_citations is not None:
         response_format["properties"]["segment_ids"]["items"]["enum"] = sorted(allowed_citations)

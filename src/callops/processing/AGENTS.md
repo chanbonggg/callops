@@ -16,7 +16,7 @@ PostgreSQL의 `jobs`와 `attempts`로 서버 작업 큐를 운영한다. `queue.
 - v2 분석 결과는 선택적으로 `summary.text`와 `summary.segment_ids`를 받는다. 근거 ID는 입력에 고정된 전사에서 검증한다. [요약 JSON과 검증 규칙](../../../docs/p2-p3-server.md#합성-요약-결과-스키마와-조회)
 - 선택 `tasks` 배열의 제목·기한·근거 구간은 저장 전에 검증한다. 후보 하나가 잘못되면 전체 분석 결과를 거부한다. [합성 할 일 후보 계약](../../../docs/p2-p3-server.md#통화에서-나온-할-일-후보-검토)
 - 가짜 STT 워커는 다운받은 원음의 해시를 확인하고 [수신 오디오 검증](../calls/audio.py)의 디코딩 길이로 합성 구간을 만든다.
-- RAG가 켜지면 지정 워커의 계약 버전 1 claim에 `RAG_EMBED`·`RAG_ANSWER`를 할당한다. 이전 API의 임대·기한·준비·청소를 적용하고 입력 스냅샷과 `result_id`를 고정한다. [서버·워커 계약](../../../docs/rag-worker-contract.md)
+- RAG가 켜지면 지정 워커의 계약 버전 1 claim에 `RAG_EMBED`·`RAG_ANSWER`를 할당한다. 이전 API의 임대·기한·준비·청소를 적용하고 입력 스냅샷과 `result_id`를 고정한다. 데스크톱 루프와 함께 실행하는 POSIX 통합 검사에서 두 단계, ACK 유실 복구와 사본 청소를 확인한다. [서버·워커 계약](../../../docs/rag-worker-contract.md) · [통합 검사](../../../tests/p3/test_rag.py)
 
 ## 변경 시 확인
 
