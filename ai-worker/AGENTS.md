@@ -21,7 +21,7 @@
 
 ## 변경 시 확인
 
-- 서버 pull 루프에 질문 모델을 연결할 때는 [RAG 서버·워커 연동 계약](../docs/rag-worker-contract.md)의 버전 협상, 입력 스냅샷, spool 재전송과 ACK 형식을 적용한다.
+- 서버 pull 루프에 질문 모델을 연결할 때는 [RAG 서버·워커 연동 계약](../docs/rag-worker-contract.md)의 버전 협상, 입력 스냅샷, spool 재전송과 ACK 형식을 적용한다. Qwen 호출의 바이트 한도 초과는 `RAG_CONTEXT_TOO_LONG`으로 보고한다.
 
 - WSL 데스크톱에서 검증한 패키지 버전과 모델 캐시 식별값은 [패키지 스냅샷](requirements-d1.txt)과 [D0~D1 기록](../docs/02-desktop.md#2026-11-21-d0d1-검증-기록)을 참고한다.
 - 실제 모델 호출을 기본 검사에 넣지 않는다. 모델 캐시·드라이버·패키지·데스크톱 연결 변경은 해당 환경의 실행 계획을 따른다. [데스크톱 계획](../docs/02-desktop.md)
