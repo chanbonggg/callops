@@ -20,7 +20,7 @@
 {% for match in matches %}
 <article class="card">
   <h2>{{ match.counterparty or '상대 미확인' }}</h2>
-  <p class="hint">{{ call_date(match.call_started_at, call_timezone) }} · 합성 전사</p>
+  <p class="hint">{{ call_date(match.call_started_at, call_timezone) }}</p>
   <p>“{{ match.segment.text }}”</p>
   <a class="button secondary standalone" href="/recordings/{{ match.recording_id }}/transcripts/{{ match.artifact_id }}#segment-{{ match.segment.segment_id }}">근거 열기 · {{ timecode(match.segment.start) }}–{{ timecode(match.segment.end) }}</a>
 </article>

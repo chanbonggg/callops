@@ -17,7 +17,9 @@ python scripts/check.py --phase P3
 
 `--phase P2`는 기본 검사와 P1·P2를 함께 실행한다. 단계 테스트가 없거나 skip/expectedFailure가 있으면 실패한다. P1~P3는 실제 테스트 DB가 필요하다. P1 DB 테스트는 빈 테스트 DB를 전제로 하므로 재실행 때 새 클러스터를 준비한다. [P2/P3 재현 명령](p2-p3-server.md)을 사용한다. 기본 검사의 녹색 결과를 기능 완료로 해석하지 않는다.
 
-현재 검증은 Windows PostgreSQL 18.0 임시 클러스터에서 수행한다(2026-11-24 기준 하네스 7·P1 3·P2 19·P3 70, 총 99개 통과. Linux·배포 환경은 미검증). 데스크톱 AI 모듈의 모의 테스트는 `python -m unittest discover -s ai-worker/tests -v`로 별도 실행하며 분석 테스트에는 Pydantic 2가 필요하다. 서버용 `.venv`에는 Pydantic이 없어 이 명령이 분석 테스트 가져오기에서 실패할 수 있다. 미리 준비한 빈 전용 PostgreSQL을 사용할 때는 `python scripts/test_postgres.py --service --phase P3`를 쓸 수 있다. GitHub Actions 워크플로는 저장소에 구성되어 있지 않다.
+2026-11-25 Ubuntu PostgreSQL 16.15 임시 클러스터에서 하네스 7·P1 3·P2 19·P3 74, 총 103개가 통과했다. 2026-11-24 Windows PostgreSQL 18.0에서는 로그인 화면 반영 뒤 총 99개가 통과했다. Ubuntu의 임시 클러스터는 TCP 루프백으로만 실행한다. 홈서버 배포 환경 검증은 별도다. 미리 준비한 빈 전용 PostgreSQL을 사용할 때는 `python scripts/test_postgres.py --service --phase P3`를 쓸 수 있다. GitHub Actions 워크플로는 저장소에 구성되어 있지 않다.
+
+데스크톱 AI 모의 검사는 D1 Python 환경에서 `python -m unittest discover -s ai-worker/tests -v`로 실행한다. 이 환경에 Pydantic 2, Ollama Python 클라이언트와 전사 검사 의존성이 들어 있다. [D1 패키지 스냅샷](../ai-worker/requirements-d1.txt)
 
 ## 파일의 역할
 
@@ -28,6 +30,7 @@ python scripts/check.py --phase P3
 | `scripts/check.py` | 로컬/CI 공통 검사, 누락된 단계 검사 실패 처리 |
 | `tests/harness/` | 검사 도구 자체의 회귀 테스트 |
 | `tests/fixtures/scenarios.json` | T01~T10 및 중복 사례의 합성 대본·기대 결과 |
+| `tests/fixtures/d4-analysis-edges.json` | D4의 합성 담당자·조건부 할 일·기준 시각·자정 경계 대본 |
 | `tests/fixtures/rag-development.json` | 개발용 가상 통화 10건·질문 20개와 실제 전사 구간 ID를 참조하는 정답 근거 |
 | `tests/fixtures/rag-final.json` | 최종 평가용 가상 통화 10건·질문 20개. 하네스가 개발 세트와의 중복, 근거 구간과 질문 범위를 검사한다. |
 | `tests/p1/` | 설정·실제 DB·마이그레이션·권한 경계 검사 |
@@ -49,6 +52,7 @@ python scripts/check.py --phase P3
 | `tests/p3/` 파일 | 확인 범위 |
 |---|---|
 | `test_queue.py` | 큐·임대·기한·ACK·취소 청소 |
+| `test_real_worker.py` | 실제 결과 형식의 선택 수락, 고정 전사 분석, 결과 상태와 무음 |
 | `test_audio_formats.py` | 형식별 수신·호환 재생 |
 | `test_transcript_views.py` | 합성 전사·요약, 인용 재생, 전사 검색, 근거 검색, 통화 질문 |
 | `test_schedule_candidates.py` | 일정 후보 검토, 직접 입력 일정, 월간 캘린더, 모의 전송 |
@@ -65,6 +69,10 @@ python scripts/check.py --phase P3
 합성 대본은 [fixture](../tests/fixtures/scenarios.json)에 있다. 기대 결과를 모델 출력에 맞춰 느슨하게 고치지 않는다. 근거·불확실성·후보 수를 검증하며 문장 전체의 문자 일치는 요구하지 않는다.
 
 T04는 AI에 입력하지 않는 수집/분류 시험이고, T01-copy는 T01 파일의 바이트 복사로 생성한다. T06/T08/T09는 실제 모델 평가 때 정정·충돌·취소가 다른 조각에 오도록 구성한다. fixture의 짧은 문장만으로 컨텍스트 초과 시험을 통과했다고 보고하지 않는다. T05의 잡음/무음은 별도 합성 오디오가 필요하다. 비프음·무음 WAV는 파일 처리 시험에는 쓸 수 있지만 한국어 STT 품질 증거가 아니다.
+
+D4 추출은 위 대본의 화자 표시와 원본 ID를 사용한다. 워커 모의 시험과 실제 모델 평가는 별도 명령으로 확인한다. 검색 품질은 개발 보고서와 같은 설정으로 최종 세트를 실행하고, 첫 고정 평가와 동일 문항의 재평가를 각각 기록한다. [AI 모듈 실행 안내](../ai-worker/README.md#d4-정답-전사-평가--wsl-데스크톱) · [D4 검색 평가](../ai-worker/README.md#d4-검색-평가)
+
+D5 모의 시험은 워커를 재시작해 결과 키와 원래 바이트가 유지되는지, 입력 버전·해시 거부와 연산 종료 차단을 확인한다. 실제 GPU 시험은 T01·T06·T09, 할 일·미확인 시각·명령이 포함된 합성 발화와 T04·무음을 별도 루프백 HTTPS에서 실행한다. [D5 실행](../ai-worker/README.md#d5-워커-실행--wsl-데스크톱) · [검증 기록](02-desktop.md#2026-11-25-d5-로컬-워커-검증)
 
 실제 오디오는 Git 밖의 임시 경로에서 생성/보관한다. 전사 평가와 STT 평가는 구분하고 P4/P5부터 프로젝트 9절의 고정 세트와 시간 기준을 적용한다.
 

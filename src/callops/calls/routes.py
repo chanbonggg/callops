@@ -10,6 +10,7 @@ from starlette.templating import Jinja2Templates
 
 from ..common import Conflict, digest
 from ..schedule.service import review_candidates
+from ..processing.transcript import TRANSCRIPT_WARNINGS
 from ..task_candidates import decide_task_candidate, review_task_candidates
 from .audio import PCM_PREVIEW_TYPES, media_type, pcm_clip, pcm_preview
 from .service import CALL_TIMEZONE, audio_expired
@@ -66,6 +67,7 @@ def routes(service):
             candidates = [candidate for candidate in candidates if candidate['transcript_id'] == artifact['id']]
         return TEMPLATES.TemplateResponse(request, 'detail.html', {
             'row': row, 'artifact': artifact, 'result': result, 'audio_available': audio_available,
+            'transcript_warnings': TRANSCRIPT_WARNINGS,
             'call_timezone': CALL_TIMEZONE, 'csrf': request.state.login['csrf'], 'active_nav': 'calls',
             'pinned': pinned, 'form': form, 'error': error, 'candidates': candidates,
         }, status_code=409 if error else 200)

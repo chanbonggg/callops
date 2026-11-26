@@ -85,7 +85,10 @@ def main():
         attempted_start = True
         stopped = False
         try:
-            checked([str(pg_ctl), "-D", str(cluster), "-l", str(work / "server.log"), "-o", f"-h 127.0.0.1 -p {port}", "-w", "start"])
+            options = f"-h 127.0.0.1 -p {port}"
+            if os.name != "nt":
+                options += " -c unix_socket_directories=''"
+            checked([str(pg_ctl), "-D", str(cluster), "-l", str(work / "server.log"), "-o", options, "-w", "start"])
         except RuntimeError:
             # This cluster has no data or SQL yet; only startup diagnostics exist.
             log = work / "server.log"

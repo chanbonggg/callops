@@ -1,4 +1,4 @@
-"""Validate synthetic task proposals and record the owner's review decisions."""
+"""Validate task proposals against their transcripts and record review decisions."""
 
 import re
 from uuid import uuid4

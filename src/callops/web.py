@@ -61,15 +61,18 @@ def unavailable(request, error):
     return JSONResponse({'error': 'STORAGE_UNAVAILABLE'}, status_code=503)
 
 
-def create_app(settings, *, secret=None, owner=None, password_hash=None, workers=None, clock=utcnow):
+def create_app(settings, *, secret=None, owner=None, password_hash=None, workers=None, clock=utcnow, real_worker=None):
     secret = secret or os.environ.get('CALLOPS_SESSION_SECRET', '')
     owner = owner or os.environ.get('CALLOPS_OWNER', '')
     password_hash = password_hash or os.environ.get('CALLOPS_PASSWORD_HASH', '')
     workers = workers if workers is not None else {'desktop': os.environ.get('CALLOPS_WORKER_TOKEN', '')}
+    real_worker = os.environ.get('CALLOPS_REAL_WORKER_ID', '') if real_worker is None else real_worker
     if (len(secret) < 32 or secret.startswith('REPLACE_') or not owner or not password_hash.startswith('scrypt:')
             or not workers or any(not name or len(token) < 32 or token.startswith('REPLACE_') for name, token in workers.items())
             or len(set(workers.values())) != len(workers)):
         raise ConfigurationError('Explicit session secret, owner, scrypt password hash and worker tokens required')
+    if real_worker and real_worker not in workers:
+        raise ConfigurationError('Real-result worker ID must name a registered worker')
     try:
         check_password_hash(password_hash, 'configuration-validation-only')
     except (ValueError, TypeError):
@@ -78,7 +81,7 @@ def create_app(settings, *, secret=None, owner=None, password_hash=None, workers
     readiness(settings)
     service = Service(settings, clock)
     service.recover()
-    queue = Queue(service)
+    queue = Queue(service, real_worker=real_worker)
     app = Starlette(
         routes=auth.routes(service, owner, password_hash) + call_routes(service)
         + worker_routes(queue) + search_routes(service) + schedule_routes(service, owner) + task_routes(service),

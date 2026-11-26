@@ -20,12 +20,21 @@ async def json_object(request):
 
 
 def routes(queue):
+    def timed_response(data):
+        return JSONResponse(data, headers={'X-CallOps-Server-Time': queue.service.clock().isoformat()})
+
+    def readiness(request):
+        return timed_response({'real_results': request.state.worker == queue.real_worker})
+
     def claim(request):
-        return JSONResponse(queue.claim(request.state.worker))
+        return timed_response(queue.claim(request.state.worker))
 
     def worker_input(request):
-        data = queue.input(request.state.worker, request.path_params['job_id'], request.headers.get('X-Lease-Token'))
-        return Response(data, media_type='application/octet-stream')
+        data, artifact, version = queue.input(request.state.worker, request.path_params['job_id'],
+                                              request.headers.get('X-Lease-Token'))
+        return Response(data, media_type='application/octet-stream',
+                        headers={'X-Input-Artifact-ID': str(artifact) if artifact else '',
+                                 'X-Input-Artifact-Version': str(version)})
 
     async def report(request):
         worker, job_id = request.state.worker, request.path_params['job_id']
@@ -36,13 +45,14 @@ def routes(queue):
                                              request.headers.get('X-Result-Request-ID'), data)
         else:
             result = await run_in_threadpool(queue.report, worker, job_id, token, action, await json_object(request))
-        return JSONResponse(result)
+        return timed_response(result)
 
     async def cleanup(request):
         data = await json_object(request)
-        return JSONResponse(await run_in_threadpool(queue.cleanup, request.state.worker, data or None))
+        return timed_response(await run_in_threadpool(queue.cleanup, request.state.worker, data or None))
 
     return [
+        Route('/worker/readiness', readiness),
         Route('/worker/claim', claim, methods=['POST']),
         Route('/worker/jobs/{job_id:uuid}/input', worker_input),
         Route('/worker/jobs/{job_id:uuid}/{action}', report, methods=['POST']),

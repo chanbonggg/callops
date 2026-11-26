@@ -1,4 +1,4 @@
-"""PostgreSQL queue protocol used by the HTTP server and synthetic worker."""
+"""PostgreSQL queue, lease and artifact storage for processing workers."""
 
 import json
 import os
@@ -15,8 +15,9 @@ from .transcript import validate_result
 class Queue:
     MAX_RESULT = 8 * 1024 * 1024
 
-    def __init__(self, service):
+    def __init__(self, service, *, real_worker=''):
         self.service = service
+        self.real_worker = real_worker
 
     def input_info(self, conn, job, recording, now):
         if job['stage'] == 'STT':
@@ -121,21 +122,30 @@ class Queue:
     def input(self, worker, job_id, token):
         with self.service.transaction() as conn:
             job, attempt = self.lookup(conn, worker, job_id, token)
-            path, sha, expires, _, _ = self.active(conn, job, attempt)
+            path, sha, _, artifact, version = self.active(conn, job, attempt)
             try:
                 data = path.read_bytes()
             except FileNotFoundError:
                 raise Conflict('INPUT_MISSING') from None
             if digest(data) != sha:
                 raise Conflict('INPUT_CORRUPT')
-            if expires <= self.service.clock():
-                raise Conflict('INPUT_EXPIRED')
-            return data
+            self.active(conn, job, attempt)
+            return data, artifact, version
 
     def report(self, worker, job_id, token, action, body):
         self.reap()
         with self.service.transaction() as conn:
             job, attempt = self.lookup(conn, worker, job_id, token)
+            if action == 'status':
+                key = identifier(body.get('request_id'))
+                if attempt['result_request_id'] not in (None, key):
+                    raise Conflict('REQUEST_CONFLICT')
+                if attempt['result_artifact_id'] is not None:
+                    return {'accepted': True, 'artifact_id': str(attempt['result_artifact_id'])}
+                self.active(conn, job, attempt)
+                return {'accepted': False, 'status': job['status'], 'lease_until': attempt['lease_until'].isoformat(),
+                        'execution_deadline': attempt['execution_deadline'].isoformat() if attempt['execution_deadline'] else None,
+                        'upload_deadline': attempt['upload_deadline'].isoformat() if attempt['upload_deadline'] else None}
             _, _, expires, _, _ = self.active(conn, job, attempt)
             now = self.service.clock()
             if action == 'heartbeat':
@@ -179,9 +189,16 @@ class Queue:
                 conn.execute("UPDATE callops.jobs SET status='UPLOADING' WHERE id=%s", (job['id'],))
                 return {'upload_deadline': deadline.isoformat()}
             if action == 'failed':
-                if body.get('code') not in ('MODEL_ERROR', 'PREPARATION_ERROR', 'UPLOAD_ERROR'):
+                code = body.get('code')
+                timeout = {'PREPARING': 'PREPARATION_TIMEOUT', 'RUNNING': 'STAGE_TIMEOUT',
+                           'UPLOADING': 'UPLOAD_TIMEOUT'}[job['status']]
+                if code in ('INPUT_MISSING', 'INPUT_CORRUPT') and job['stage'] == 'ANALYSIS':
+                    conn.execute("UPDATE callops.jobs SET status='FAILED_MANUAL',error_code=%s WHERE id=%s", (code, job['id']))
+                    conn.execute('UPDATE callops.attempts SET cleanup_requested=true WHERE id=%s', (attempt['id'],))
+                elif code in ('MODEL_ERROR', 'PREPARATION_ERROR', 'UPLOAD_ERROR', timeout):
+                    self.retry(conn, job, code)
+                else:
                     raise Conflict('INVALID_ERROR_CODE')
-                self.retry(conn, job, body['code'])
                 return {'status': 'STOP_AND_CLEAN'}
             if action == 'waiting-file' and job['status'] == 'PREPARING':
                 conn.execute("UPDATE callops.jobs SET status='WAITING_FOR_FILE',retry_at=%s WHERE id=%s", (now + timedelta(minutes=1), job['id']))
@@ -206,6 +223,8 @@ class Queue:
             try:
                 recording = self.service.recording(conn, job['recording_id'])
                 payload = validate_result(json.loads(data), job['stage'], recording['duration_seconds'])
+                if not payload['synthetic'] and worker != self.real_worker:
+                    raise ValueError('Real result intake disabled for worker')
                 if (payload.get('job_id') != str(job['id'])
                         or payload.get('attempt_id') != str(attempt['id'])
                         or payload.get('input_artifact_id') != (str(artifact) if artifact else None)
@@ -222,16 +241,14 @@ class Queue:
                     candidates = validated_events(payload['events'], transcript)
                     if 'tasks' in payload:
                         tasks = validated_tasks(payload['tasks'], transcript)
-                    if 'summary' in payload and (
-                        transcript['schema_version'] != 2
-                        or max(payload['summary']['segment_ids']) > len(transcript['segments'])
-                    ):
-                        raise ValueError('Invalid summary evidence')
+                    evidence = ([payload['summary']] if 'summary' in payload else [])
+                    evidence += payload.get('needs_review', []) + payload.get('contract_mentions', [])
+                    if any(max(item['segment_ids']) > len(transcript['segments']) for item in evidence):
+                        raise ValueError('Invalid analysis evidence')
             except Conflict:
                 raise
             except (ValueError, OverflowError, RecursionError):
                 raise Conflict('INVALID_RESULT') from None
-            # Synthetic results exercise storage and review without a model runtime.
             artifact_id = uuid4()
             part = self.service.safe_path('artifacts', str(artifact_id) + '.part')
             target = self.service.safe_path('artifacts', str(artifact_id))
@@ -242,7 +259,7 @@ class Queue:
             os.replace(part, target)
             conn.execute('''INSERT INTO callops.artifacts (id,recording_id,version,sha256,size_bytes,expires_at)
                 VALUES (%s,%s,%s,%s,%s,%s)''', (artifact_id, job['recording_id'], job['pipeline_version'], sha, len(data), self.service.clock() + timedelta(days=90)))
-            if job['stage'] == 'STT':
+            if job['stage'] == 'STT' and 'NO_SPEECH' not in payload.get('warnings', ()):
                 conn.execute('''INSERT INTO callops.jobs (id,recording_id,stage,input_artifact_id,pipeline_version,retry_at)
                     VALUES (%s,%s,'ANALYSIS',%s,%s,%s)''', (uuid4(), job['recording_id'], artifact_id, job['pipeline_version'], self.service.clock()))
             if candidates:

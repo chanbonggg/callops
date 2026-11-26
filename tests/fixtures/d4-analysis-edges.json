@@ -1,0 +1,45 @@
+{
+  "synthetic": true,
+  "call_started_at": "2026-12-30T23:30:00Z",
+  "timezone": "Asia/Seoul",
+  "cases": [
+    {
+      "id": "D4-TASK",
+      "input": "제가 내일 오후 2시까지 회의 자료를 보내겠습니다. 제가 내일 오후 5시까지 회의실을 확인하겠습니다.",
+      "d4_speakers": ["A", "B"],
+      "expected": {
+        "schedule_count": 0,
+        "tasks": [
+          {"title_contains": "자료", "owner": "A", "due_at": "2027-01-01T14:00:00+09:00", "segment_id": 1, "statuses": ["confirmed"]},
+          {"title_contains": "회의실", "owner": "B", "due_at": "2027-01-01T17:00:00+09:00", "segment_id": 2, "statuses": ["confirmed"]}
+        ]
+      }
+    },
+    {
+      "id": "D4-SPEAKER",
+      "input": "제가 회의록을 정리하겠습니다. 만약 내부 승인이 나면 제가 견본을 보내겠습니다.",
+      "d4_speakers": [null, "B"],
+      "expected": {
+        "schedule_count": 0,
+        "tasks": [
+          {"title_contains": "회의록", "owner": null, "due_at": null, "segment_id": 1, "statuses": ["confirmed", "uncertain"]},
+          {"title_contains": "견본", "owner": "B", "due_at": null, "segment_id": 2, "statuses": ["proposed", "uncertain"]}
+        ],
+        "reviews": [[1], [2]]
+      }
+    },
+    {
+      "id": "D4-NO-CLOCK",
+      "input": "내일 오후 3시부터 4시까지 준비 회의합시다. 네, 그 시간에 만나죠.",
+      "d4_speakers": ["A", "B"],
+      "call_started_at": null,
+      "expected": {"schedule_count": 1, "start_at": null, "end_at": null, "date_text": "내일", "reviews": [[1, 2]]}
+    },
+    {
+      "id": "D4-OVERNIGHT",
+      "input": "2026년 12월 31일 오후 11시부터 다음 날 오전 1시까지 준비 회의합시다. 네, 확정합니다.",
+      "d4_speakers": ["A", "B"],
+      "expected": {"schedule_count": 1, "start_at": "2026-12-31T23:00:00+09:00", "end_at": "2027-01-01T01:00:00+09:00"}
+    }
+  ]
+}

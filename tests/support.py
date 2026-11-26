@@ -17,6 +17,8 @@ from callops.web import create_app
 
 
 class ProductCase(unittest.TestCase):
+    real_worker = ''
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -27,7 +29,8 @@ class ProductCase(unittest.TestCase):
             raise RuntimeError('Dedicated test DB required')
         self.tokens = {'one': 'test-worker-one-' + 'x' * 32, 'two': 'test-worker-two-' + 'y' * 32}
         self.app = create_app(self.settings, secret='test-session-' + 'z' * 32, owner='owner',
-                              password_hash=generate_password_hash('test-password'), workers=self.tokens, clock=lambda: self.now)
+                              password_hash=generate_password_hash('test-password'), workers=self.tokens,
+                              clock=lambda: self.now, real_worker=self.real_worker)
         self.client = self.enterContext(TestClient(self.app, base_url='https://localhost', follow_redirects=False))
         self.service = self.app.state.callops
         self.queue = self.app.state.queue
