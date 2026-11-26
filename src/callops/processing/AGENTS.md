@@ -16,7 +16,7 @@ PostgreSQL의 `jobs`와 `attempts`로 서버 작업 큐를 운영한다. `queue.
 - v2 분석 결과는 선택적으로 `summary.text`와 `summary.segment_ids`를 받는다. 근거 ID는 입력에 고정된 전사에서 검증한다. [요약 JSON과 검증 규칙](../../../docs/p2-p3-server.md#합성-요약-결과-스키마와-조회)
 - 선택 `tasks` 배열의 제목·기한·근거 구간은 저장 전에 검증한다. 후보 하나가 잘못되면 전체 분석 결과를 거부한다. [합성 할 일 후보 계약](../../../docs/p2-p3-server.md#통화에서-나온-할-일-후보-검토)
 - 가짜 STT 워커는 다운받은 원음의 해시를 확인하고 [수신 오디오 검증](../calls/audio.py)의 디코딩 길이로 합성 구간을 만든다.
-- 질문 모델은 데스크톱의 `RAG_EMBED`·`RAG_ANSWER` 실행 단계로 제공한다. 현재 서버는 STT·ANALYSIS를 할당한다. 후속 구현에는 `rag_contract_version` 협상, 입력 스냅샷과 결과 ACK, 비선점 할당, RAG 단계별 기한 및 컨텍스트 초과의 비재시도를 적용한다. [서버·워커 계약](../../../docs/rag-worker-contract.md)
+- 질문 모델은 데스크톱의 `RAG_EMBED`·`RAG_ANSWER` 실행 단계로 제공한다. 현재 서버는 STT·ANALYSIS를 할당한다. 후속 구현에는 `rag_contract_version` 협상, 입력 스냅샷과 결과 ACK, 비선점 할당(진행 중인 질문의 두 단계 사이에 배경 작업을 끼우지 않고, 질문이 기다리는 인덱싱을 먼저 배정), RAG 단계별 기한 및 컨텍스트 초과의 비재시도(`failed` 허용 코드 추가)를 적용한다. [서버·워커 계약](../../../docs/rag-worker-contract.md)
 
 ## 변경 시 확인
 
