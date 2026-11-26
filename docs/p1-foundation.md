@@ -16,7 +16,7 @@ Windows 예시이며 PostgreSQL 실행 파일 경로는 실제 설치 위치로 
 
 네이티브 테스트 실행기는 저장소의 무시된 `tmp/callops-p1-*`에 새 클러스터를 만들고 임의의 로컬 포트·임시 비밀번호를 사용한다. 실제 data_directory를 대조한 뒤 callops_test DB만 생성한다. 테스트 종료 시 자신의 클러스터를 중지하고 해당 임시 디렉터리만 정리한다. 종료 상태를 확인할 수 없으면 데이터를 지우지 않는다. Windows 제한 토큰에서 pg_ctl 시작이 실패할 수 있으며, 이때 DB 테스트를 통과로 간주하지 않는다.
 
-기존 서비스 방식의 테스트는 빈 전용 PostgreSQL에 `CALLOPS_TEST_ADMIN_URL`을 명시하고 `python scripts/test_postgres.py --service --phase P3`를 실행한다. 이미 CallOps 스키마/역할/테이블이 있으면 초기화하거나 지우지 않고 거부한다. 운영 URL이나 일반 DATABASE_URL은 사용하지 않는다.
+DB 검사에는 pgvector가 설치된 PostgreSQL 서버가 필요하다. 빈 전용 서비스에 `CALLOPS_TEST_ADMIN_URL`을 지정하고 `python scripts/test_postgres.py --service --phase P3`를 실행할 수 있다. 기존 CallOps 스키마·역할·테이블이 있는 서비스는 거부한다. [확장 포함 이미지](../deploy/server/postgres.Dockerfile)
 
 `python scripts/check.py --phase P1` 직접 실행에는 별도로 준비된 새 테스트 DB의 `CALLOPS_TEST_DATABASE_URL`, `CALLOPS_TEST_MIGRATION_DATABASE_URL`이 필요하다. 위 실행기가 생성·주입하므로 일반 개발에서는 실행기를 사용한다. 테스트는 반복 실행 때 데이터를 삭제하는 방식이 아니라 매번 빈 DB로 시작한다.
 

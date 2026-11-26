@@ -19,6 +19,7 @@ from .common import Conflict, utcnow
 from .config import ConfigurationError
 from .db import readiness
 from .processing.queue import Queue
+from .processing.rag import Rag
 from .processing.routes import routes as worker_routes
 from .schedule.routes import routes as schedule_routes
 from .search.routes import routes as search_routes
@@ -61,7 +62,8 @@ def unavailable(request, error):
     return JSONResponse({'error': 'STORAGE_UNAVAILABLE'}, status_code=503)
 
 
-def create_app(settings, *, secret=None, owner=None, password_hash=None, workers=None, clock=utcnow, real_worker=None):
+def create_app(settings, *, secret=None, owner=None, password_hash=None, workers=None, clock=utcnow,
+               real_worker=None, allowed_hosts=('localhost', '127.0.0.1'), rag_enabled=None):
     secret = secret or os.environ.get('CALLOPS_SESSION_SECRET', '')
     owner = owner or os.environ.get('CALLOPS_OWNER', '')
     password_hash = password_hash or os.environ.get('CALLOPS_PASSWORD_HASH', '')
@@ -73,6 +75,9 @@ def create_app(settings, *, secret=None, owner=None, password_hash=None, workers
         raise ConfigurationError('Explicit session secret, owner, scrypt password hash and worker tokens required')
     if real_worker and real_worker not in workers:
         raise ConfigurationError('Real-result worker ID must name a registered worker')
+    rag_enabled = os.environ.get('CALLOPS_ENABLE_RAG') == '1' if rag_enabled is None else rag_enabled
+    if rag_enabled and not real_worker:
+        raise ConfigurationError('RAG requires a designated real-result worker')
     try:
         check_password_hash(password_hash, 'configuration-validation-only')
     except (ValueError, TypeError):
@@ -81,13 +86,14 @@ def create_app(settings, *, secret=None, owner=None, password_hash=None, workers
     readiness(settings)
     service = Service(settings, clock)
     service.recover()
-    queue = Queue(service, real_worker=real_worker)
+    rag = Rag(service, owner) if rag_enabled else None
+    queue = Queue(service, real_worker=real_worker, rag=rag)
     app = Starlette(
         routes=auth.routes(service, owner, password_hash) + call_routes(service)
-        + worker_routes(queue) + search_routes(service) + schedule_routes(service, owner) + task_routes(service),
+        + worker_routes(queue) + search_routes(service, rag) + schedule_routes(service, owner) + task_routes(service),
         middleware=[
             Middleware(security_headers),
-            Middleware(TrustedHostMiddleware, allowed_hosts=['localhost', '127.0.0.1']),
+            Middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts),
             Middleware(BodyLimits),
             Middleware(SessionMiddleware, secret_key=secret, max_age=int(auth.SESSION_AGE.total_seconds()),
                        https_only=True, same_site='strict'),

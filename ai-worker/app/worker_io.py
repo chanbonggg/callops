@@ -14,6 +14,11 @@ from uuid import UUID
 
 MAX_RESULT = 8 * 1024 * 1024
 MAX_AUDIO = 500 * 1024 * 1024
+MAX_RAG_INPUT = 80 * 1024
+MAX_RAG_RESULT = 1024 * 1024
+RAG_CONTRACT_VERSION = 1
+RAG_STAGES = ('RAG_EMBED', 'RAG_ANSWER')
+RAG_CONTEXT_TOO_LONG = 'RAG_CONTEXT_TOO_LONG'
 COPY_TTL = 24 * 60 * 60
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,17 +36,47 @@ def copy_key(value):
 def verify_job(job):
     for field in ('job_id', 'copy_key', 'lease_token'):
         copy_key(job[field])
-    if job['stage'] == 'ANALYSIS':
-        copy_key(job['input_artifact_id'])
-    elif job['stage'] != 'STT' or job['input_artifact_id'] is not None:
-        raise ValueError('INVALID_JOB_STAGE')
-    if (re.fullmatch('[0-9a-f]{64}', job['input_sha256']) is None
-            or type(job['input_artifact_version']) is not int or job['input_artifact_version'] < 1):
+    stage = job['stage']
+    if stage in RAG_STAGES:
+        schema = job.get('schema_version')
+        if type(schema) is not int or schema != RAG_CONTRACT_VERSION:
+            raise ValueError('INVALID_JOB_SCHEMA')
+        copy_key(job['input_snapshot_id'])
+        version = job['input_snapshot_version']
+    else:
+        if stage == 'ANALYSIS':
+            copy_key(job['input_artifact_id'])
+        elif stage != 'STT' or job['input_artifact_id'] is not None:
+            raise ValueError('INVALID_JOB_STAGE')
+        version = job['input_artifact_version']
+    sha = job['input_sha256']
+    if (not isinstance(sha, str) or re.fullmatch('[0-9a-f]{64}', sha) is None
+            or type(version) is not int or version < 1):
         raise ValueError('INVALID_JOB_INPUT')
 
 
 def json_bytes(data):
     return json.dumps(data, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()
+
+
+def result_limit(stage):
+    return MAX_RAG_RESULT if stage in RAG_STAGES else MAX_RESULT
+
+
+def result_bytes(job, output):
+    binding = {'job_id': job['job_id'], 'attempt_id': job['copy_key'], 'input_sha256': job['input_sha256']}
+    if job['stage'] in RAG_STAGES:
+        packet = binding | {'schema_version': RAG_CONTRACT_VERSION, 'output': output,
+                            'input_snapshot_id': job['input_snapshot_id'],
+                            'input_snapshot_version': job['input_snapshot_version']}
+    else:
+        packet = output | binding | {'schema_version': 2, 'synthetic': False,
+                                     'input_artifact_id': job['input_artifact_id'],
+                                     'input_artifact_version': job['input_artifact_version']}
+    data = json_bytes(packet)
+    if len(data) > result_limit(job['stage']):
+        raise WorkerError('MODEL_ERROR')
+    return data
 
 
 def open_private(path):
@@ -120,7 +155,7 @@ class Copies:
             verify_job(job)
             copy_key(report['request_id'])
             data = snapshot['payload'].encode()
-            if (job['copy_key'] != key or not 0 < len(data) <= MAX_RESULT or report['size'] != len(data)
+            if (job['copy_key'] != key or not 0 < len(data) <= result_limit(job['stage']) or report['size'] != len(data)
                     or hashlib.sha256(data).hexdigest() != report['sha256']):
                 raise WorkerError('SPOOL_MISMATCH')
             yield job, report, data

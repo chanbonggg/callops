@@ -1,0 +1,135 @@
+name: callops
+
+x-app: &app
+  image: local/callops:current
+  user: "${CALLOPS_UID:?}:${CALLOPS_GID:?}"
+  read_only: true
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  environment: &db-client
+    CALLOPS_DATA_ROOT: /data
+    PGSSLROOTCERT: /tls/db.crt
+  volumes:
+    - ${CALLOPS_CONFIG_DIR:?}/db.crt:/tls/db.crt:ro
+  logging:
+    driver: local
+
+x-runtime: &runtime
+  <<: *app
+  env_file:
+    - path: ${CALLOPS_CONFIG_DIR:?}/runtime.env
+      format: raw
+  restart: unless-stopped
+
+services:
+  db:
+    image: local/callops-postgres:18-vector-0.8.7
+    build:
+      context: ../..
+      dockerfile: deploy/server/postgres.Dockerfile
+    entrypoint: ["/bin/sh", "/etc/callops/postgres-entrypoint.sh"]
+    environment:
+      POSTGRES_DB: callops
+    env_file:
+      - path: ${CALLOPS_CONFIG_DIR:?}/db.env
+        format: raw
+    volumes:
+      - database:/var/lib/postgresql
+      - ${CALLOPS_CONFIG_DIR:?}/db.crt:/db-tls/db.crt:ro
+      - ${CALLOPS_CONFIG_DIR:?}/db.key:/db-tls/db.key:ro
+      - ./postgres-entrypoint.sh:/etc/callops/postgres-entrypoint.sh:ro
+      - ./pg_hba.conf:/etc/callops/pg_hba.conf:ro
+      - ./bootstrap.sql:/etc/callops/bootstrap.sql:ro
+      - ./init-roles.sh:/docker-entrypoint-initdb.d/10-callops.sh:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          PGSSLMODE=require PGPASSWORD="$$CALLOPS_DB_APP_PASSWORD"
+          psql -h 127.0.0.1 -U callops_app -d callops -Atqc 'SELECT 1' >/dev/null
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    logging:
+      driver: local
+
+  migrate:
+    <<: *app
+    profiles: ["migration"]
+    env_file:
+      - path: ${CALLOPS_CONFIG_DIR:?}/migration.env
+        format: raw
+    command: ["python", "scripts/manage.py", "migrate"]
+
+  web:
+    <<: *runtime
+    build:
+      context: ../..
+      dockerfile: deploy/server/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *db-client
+      CALLOPS_WEB_HOST: ${CALLOPS_WEB_HOST:?}
+      CALLOPS_VPN_IP: ${CALLOPS_VPN_IP:?}
+      CALLOPS_PUBLIC_HOST: callops.finel.co.kr
+    env_file:
+      - path: ${CALLOPS_CONFIG_DIR:?}/runtime.env
+        format: raw
+      - path: ${CALLOPS_CONFIG_DIR:?}/web.env
+        format: raw
+    volumes:
+      - ${CALLOPS_CONFIG_DIR:?}/db.crt:/tls/db.crt:ro
+      - ${CALLOPS_CONFIG_DIR:?}/web-ca.crt:/tls/web-ca.crt:ro
+      - ${CALLOPS_CONFIG_DIR:?}/web.crt:/tls/web.crt:ro
+      - ${CALLOPS_CONFIG_DIR:?}/web.key:/tls/web.key:ro
+      - ${CALLOPS_DATA_DIR:?}:/data
+    networks:
+      default: {}
+      proxy-shared:
+        aliases:
+          - callops-web
+    ports:
+      - target: 8443
+        published: "8443"
+        host_ip: ${CALLOPS_VPN_IP:?}
+    command: ["python", "deploy/server/serve.py"]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python scripts/manage.py check &&
+          python -c "import ssl, urllib.request; urllib.request.urlopen('https://localhost:8443/login', context=ssl.create_default_context(cafile='/tls/web-ca.crt'), timeout=3).close()"
+      start_period: 15s
+      interval: 30s
+      timeout: 12s
+      retries: 3
+
+  maintenance:
+    <<: *runtime
+    depends_on:
+      web:
+        condition: service_healthy
+    volumes:
+      - ${CALLOPS_CONFIG_DIR:?}/db.crt:/tls/db.crt:ro
+      - ${CALLOPS_DATA_DIR:?}:/data
+    command:
+      - /bin/sh
+      - -c
+      - |
+        trap 'exit 0' TERM INT
+        while :; do
+          python scripts/manage.py maintain
+          sleep 300 &
+          wait "$$!"
+        done
+
+networks:
+  proxy-shared:
+    external: true
+
+volumes:
+  database:

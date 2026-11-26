@@ -15,7 +15,7 @@ python scripts/check.py --phase P3
 
 기본 명령은 Git에 포함될 파일의 금지 데이터 경로, Python 구문, Markdown 상대 파일 링크·코드 블록, 하네스 자체 테스트를 검사한다. 파일 내용에서 모든 비밀정보를 탐지하는 스캐너나 네트워크 샌드박스는 아니다. 외부 링크와 Markdown anchor는 자동 검사하지 않는다.
 
-`--phase P2`는 기본 검사와 P1·P2를 함께 실행한다. 단계 테스트가 없거나 skip/expectedFailure가 있으면 실패한다. P1~P3는 실제 테스트 DB가 필요하다. P1 DB 테스트는 빈 테스트 DB를 전제로 하므로 재실행 때 새 클러스터를 준비한다. [P2/P3 재현 명령](p2-p3-server.md)을 사용한다. 기본 검사의 녹색 결과를 기능 완료로 해석하지 않는다.
+`--phase P2`는 기본 검사와 P1·P2를 함께 실행한다. 테스트가 없거나 skip/expectedFailure가 있으면 실패한다. P1~P3는 pgvector가 설치된 실제 PostgreSQL의 빈 테스트 DB에서 실행한다. [DB 환경](p1-foundation.md) · [P2/P3 실행](p2-p3-server.md)
 
 2026-11-25 Ubuntu PostgreSQL 16.15 임시 클러스터에서 하네스 7·P1 3·P2 19·P3 74, 총 103개가 통과했다. 2026-11-24 Windows PostgreSQL 18.0에서는 로그인 화면 반영 뒤 총 99개가 통과했다. Ubuntu의 임시 클러스터는 TCP 루프백으로만 실행한다. 홈서버 배포 환경 검증은 별도다. 미리 준비한 빈 전용 PostgreSQL을 사용할 때는 `python scripts/test_postgres.py --service --phase P3`를 쓸 수 있다. GitHub Actions 워크플로는 저장소에 구성되어 있지 않다.
 
@@ -53,6 +53,7 @@ python scripts/check.py --phase P3
 |---|---|
 | `test_queue.py` | 큐·임대·기한·ACK·취소 청소 |
 | `test_real_worker.py` | 실제 결과 형식의 선택 수락, 고정 전사 분석, 결과 상태와 무음 |
+| `test_rag.py` | pgvector 검색과 질문 작업, POSIX에서 데스크톱 루프의 두 RAG 단계·ACK 유실 복구·사본 청소 |
 | `test_audio_formats.py` | 형식별 수신·호환 재생 |
 | `test_transcript_views.py` | 합성 전사·요약, 인용 재생, 전사 검색, 근거 검색, 통화 질문 |
 | `test_schedule_candidates.py` | 일정 후보 검토, 직접 입력 일정, 월간 캘린더, 모의 전송 |

@@ -12,24 +12,29 @@ MAX_SCAN_BYTES = 16 * 1024 * 1024
 MAX_RESULTS = 5
 
 
-def transcript_candidates(conn, now, filters, values):
+def transcript_query(filters):
     query = '''
-        SELECT artifact.*, r.counterparty, r.call_started_at, r.duration_seconds
+        SELECT artifact.*, r.counterparty, r.call_started_at, r.call_time_trusted,
+               r.duration_seconds, r.received_at, r.audio_deletion_state, r.storage_key
         FROM callops.recordings r
         JOIN LATERAL (
             SELECT f.* FROM callops.jobs j
             JOIN callops.attempts a ON a.job_id=j.id
             JOIN callops.artifacts f ON f.id=a.result_artifact_id
             WHERE j.recording_id=r.id AND f.recording_id=r.id AND j.stage='STT'
-            ORDER BY j.pipeline_version DESC
+            ORDER BY j.pipeline_version DESC, a.id DESC
             LIMIT 1
         ) artifact ON true
         WHERE r.classification_status='BUSINESS_APPROVED' AND r.deletion_state='NONE'
-          AND artifact.available AND artifact.expires_at>%s
+          AND artifact.available AND artifact.deletion_state='NONE' AND artifact.expires_at>%s
     '''
     if filters:
         query += ' AND ' + ' AND '.join(filters)
-    query += ' ORDER BY r.received_at DESC, r.id DESC LIMIT %s'
+    return query
+
+
+def transcript_candidates(conn, now, filters, values):
+    query = transcript_query(filters) + ' ORDER BY r.received_at DESC, r.id DESC LIMIT %s'
     return conn.execute(query, [now, *values, MAX_CALLS + 1]).fetchall()
 
 

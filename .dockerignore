@@ -1,0 +1,14 @@
+**
+!requirements.txt
+!src/
+!src/**
+!scripts/
+!scripts/manage.py
+!migrations/
+!migrations/*.sql
+!deploy/
+!deploy/server/
+!deploy/server/serve.py
+!deploy/server/postgres.Dockerfile
+**/__pycache__/
+**/*.pyc

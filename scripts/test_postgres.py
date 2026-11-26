@@ -29,6 +29,8 @@ def provision(admin_url, phase):
             raise RuntimeError("Test database/roles already provisioned; refusing to reuse or reset")
         if conn.execute("SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema'))").fetchone()[0]:
             raise RuntimeError("Test database must be empty")
+        if not conn.execute("SELECT EXISTS (SELECT FROM pg_available_extensions WHERE name='vector')").fetchone()[0]:
+            raise RuntimeError("pgvector must be installed in the disposable PostgreSQL server")
         conn.execute((ROOT / "deploy/server/bootstrap.sql").read_text(encoding="utf-8"))
         for role in ("callops_app", "callops_migrator"):
             conn.execute(sql.SQL("ALTER ROLE {} PASSWORD {}").format(sql.Identifier(role), sql.Literal(password)))
